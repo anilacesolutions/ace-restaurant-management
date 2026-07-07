@@ -1,0 +1,7 @@
+# OS
+.DS_Store
+# Defense-in-depth (subdir .gitignore'lar da var)
+**/.env
+**/.env.local
+**/node_modules/
+**/.next/
