@@ -26,10 +26,12 @@ export function TableOrderEntry({
   tableNumber,
   backHref,
   unauthorizedHref,
+  cashier = false,
 }: {
   tableNumber: number;
   backHref: string;
   unauthorizedHref: string;
+  cashier?: boolean;
 }) {
   const router = useRouter();
 
@@ -40,7 +42,9 @@ export function TableOrderEntry({
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
   const [picking, setPicking] = useState<MenuItem | null>(null);
   const [showDraft, setShowDraft] = useState(false);
+  const [showClose, setShowClose] = useState(false);
   const [sending, setSending] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const draftKey = `order-draft-masa-${tableNumber}`;
@@ -150,6 +154,27 @@ export function TableOrderEntry({
     }
   }
 
+  async function closeTable(paymentMethod: string) {
+    setClosing(true);
+    setError(null);
+    try {
+      await api(`/api/v1/orders/table/${tableNumber}/close`, {
+        method: "POST",
+        body: JSON.stringify({ paymentMethod }),
+      });
+      // Clear any leftover draft and leave — the table is free now.
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        /* ignore */
+      }
+      router.replace(backHref);
+    } catch (e) {
+      setClosing(false);
+      guard(e);
+    }
+  }
+
   if (!loaded && !error) {
     return (
       <main className="flex flex-1 items-center justify-center p-8">
@@ -188,13 +213,27 @@ export function TableOrderEntry({
   }
 
   return (
-    <AdisyonView
-      tableNumber={tableNumber}
-      order={order}
-      backHref={backHref}
-      error={error}
-      onNewOrder={() => setView("menu")}
-    />
+    <>
+      <AdisyonView
+        tableNumber={tableNumber}
+        order={order}
+        backHref={backHref}
+        error={error}
+        cashier={cashier}
+        onNewOrder={() => setView("menu")}
+        onPrint={() => order && printAdisyon(order, tableNumber)}
+        onClose={() => setShowClose(true)}
+      />
+      {showClose && order && (
+        <CloseModal
+          order={order}
+          tableNumber={tableNumber}
+          closing={closing}
+          onCancel={() => setShowClose(false)}
+          onConfirm={closeTable}
+        />
+      )}
+    </>
   );
 }
 
@@ -205,17 +244,24 @@ function AdisyonView({
   order,
   backHref,
   error,
+  cashier,
   onNewOrder,
+  onPrint,
+  onClose,
 }: {
   tableNumber: number;
   order: Order | null;
   backHref: string;
   error: string | null;
+  cashier: boolean;
   onNewOrder: () => void;
+  onPrint: () => void;
+  onClose: () => void;
 }) {
   const items = (order?.items ?? []).filter(
     (it) => it.status !== "voided" && it.status !== "refunded",
   );
+  const hasOrder = items.length > 0;
   const kdvLines = Object.entries(order?.kdvBreakdown ?? {}).filter(
     ([, v]) => v > 0,
   );
@@ -308,9 +354,25 @@ function AdisyonView({
         </>
       )}
 
-      {/* New order CTA */}
+      {/* Actions */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto flex max-w-3xl flex-col gap-2">
+          {cashier && hasOrder && (
+            <div className="flex gap-2">
+              <button
+                onClick={onPrint}
+                className="flex-1 rounded-full border border-zinc-300 bg-white py-3.5 text-base font-semibold text-zinc-700 active:bg-zinc-50"
+              >
+                Adisyon Bas
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-full bg-green-700 py-3.5 text-base font-semibold text-white active:bg-green-800"
+              >
+                Masa Kapat
+              </button>
+            </div>
+          )}
           <button
             onClick={onNewOrder}
             className="w-full rounded-full bg-amber-700 py-3.5 text-base font-semibold text-white shadow-sm active:bg-amber-800"
@@ -321,6 +383,155 @@ function AdisyonView({
       </div>
     </main>
   );
+}
+
+// ---- Close table modal (payment) -----------------------------------------
+
+function CloseModal({
+  order,
+  tableNumber,
+  closing,
+  onCancel,
+  onConfirm,
+}: {
+  order: Order;
+  tableNumber: number;
+  closing: boolean;
+  onCancel: () => void;
+  onConfirm: (paymentMethod: string) => void;
+}) {
+  const [method, setMethod] = useState("nakit");
+  const methods = [
+    { key: "nakit", label: "Nakit" },
+    { key: "kart", label: "Kart" },
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-t-3xl bg-white p-5 sm:rounded-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-semibold text-zinc-900">
+          Masa {tableNumber} Kapat
+        </h3>
+        <div className="mt-4 flex items-baseline justify-between rounded-2xl bg-zinc-50 px-4 py-3">
+          <span className="text-sm text-zinc-600">Toplam</span>
+          <span className="text-2xl font-bold tabular-nums text-zinc-900">
+            {formatTRY(order.grandTotal)}
+          </span>
+        </div>
+
+        <span className="mt-5 mb-2 block text-sm font-medium text-zinc-700">
+          Ödeme yöntemi
+        </span>
+        <div className="flex gap-2">
+          {methods.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setMethod(m.key)}
+              className={`flex-1 rounded-xl py-3 text-base font-semibold active:opacity-90 ${
+                method === m.key
+                  ? "bg-amber-700 text-white"
+                  : "bg-zinc-100 text-zinc-700"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={closing}
+            className="flex-1 rounded-xl bg-zinc-200 py-3.5 text-base font-semibold text-zinc-700 active:bg-zinc-300 disabled:opacity-50"
+          >
+            Vazgeç
+          </button>
+          <button
+            onClick={() => onConfirm(method)}
+            disabled={closing}
+            className="flex-[2] rounded-xl bg-green-700 py-3.5 text-base font-semibold text-white active:bg-green-800 disabled:opacity-50"
+          >
+            {closing ? "Kapatılıyor..." : "Hesabı Kapat"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Print adisyon (browser print — NOT the thermal bridge) --------------
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function printAdisyon(order: Order, tableNumber: number) {
+  const items = order.items.filter(
+    (it) => it.status !== "voided" && it.status !== "refunded",
+  );
+  const now = new Date().toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
+  });
+  const rows = items
+    .map(
+      (it) =>
+        `<tr><td class="q">${it.qty}×</td><td class="n">${escapeHtml(
+          it.name,
+        )}</td><td class="r">${formatTRY(it.unitPrice * it.qty)}</td></tr>`,
+    )
+    .join("");
+  const kdv = Object.entries(order.kdvBreakdown ?? {})
+    .filter(([, v]) => v > 0)
+    .map(
+      ([rate, v]) =>
+        `<div class="row sm"><span>KDV %${rate}</span><span>${formatTRY(
+          v,
+        )}</span></div>`,
+    )
+    .join("");
+
+  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<title>Adisyon - Masa ${tableNumber}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px; color: #111; width: 300px; }
+  h1 { font-size: 16px; text-align: center; margin: 0 0 2px; letter-spacing: .5px; }
+  .sub { text-align: center; font-size: 11px; color: #555; margin-bottom: 10px; }
+  hr { border: none; border-top: 1px dashed #999; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 3px 0; vertical-align: top; }
+  td.q { width: 28px; font-weight: 700; }
+  td.r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+  .row.sm { color: #555; }
+  .total { font-size: 16px; font-weight: 800; }
+  .foot { text-align: center; font-size: 11px; color: #555; margin-top: 12px; }
+</style></head>
+<body onload="window.print()">
+  <h1>GÜN GÜZEL BAHÇE</h1>
+  <div class="sub">Masa ${tableNumber} · ${now}</div>
+  <hr>
+  <table>${rows}</table>
+  <hr>
+  ${kdv}
+  <div class="row total"><span>TOPLAM</span><span>${formatTRY(
+    order.grandTotal,
+  )}</span></div>
+  <div class="foot">Afiyet olsun · Bu bir adisyondur, mali belge değildir.</div>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=340,height=640");
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
 }
 
 // ---- Menu view (add items) -----------------------------------------------

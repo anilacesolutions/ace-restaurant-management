@@ -166,6 +166,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authSvc.RequireAdmin)
 			menuH.MountAdmin(r)
+			orderH.MountAdmin(r)
 			tablesH.MountAdmin(r)
 			waitersH.Mount(r)
 			expenseH.MountAdmin(r)

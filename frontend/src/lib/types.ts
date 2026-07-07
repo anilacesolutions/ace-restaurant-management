@@ -54,6 +54,7 @@ export interface Order {
   kdvBreakdown: Record<string, Kurus>;
   otv: Kurus;
   grandTotal: Kurus;
+  paymentMethod?: string;
   openedAt: string;
   closedAt?: string;
   updatedAt: string;

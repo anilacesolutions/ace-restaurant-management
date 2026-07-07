@@ -34,6 +34,37 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Post("/orders/table/{number}/items", h.addItems)
 }
 
+// MountAdmin mounts cashier-only order actions (settle/close a table).
+func (h *Handler) MountAdmin(r chi.Router) {
+	r.Post("/orders/table/{number}/close", h.closeTable)
+}
+
+type closeReq struct {
+	PaymentMethod string `json:"paymentMethod"`
+}
+
+func (h *Handler) closeTable(w http.ResponseWriter, r *http.Request) {
+	tableNo, ok := parseTable(w, r)
+	if !ok {
+		return
+	}
+	var req closeReq
+	// Body is optional; ignore decode errors on an empty body.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	o, err := h.svc.CloseTable(r.Context(), h.restaurantID, tableNo, req.PaymentMethod, time.Now())
+	if err != nil {
+		var verr ErrValidation
+		if errors.As(err, &verr) {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Msg)
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"order": o})
+}
+
 func (h *Handler) listActive(w http.ResponseWriter, r *http.Request) {
 	orders, err := h.svc.ListActive(r.Context(), h.restaurantID)
 	if err != nil {

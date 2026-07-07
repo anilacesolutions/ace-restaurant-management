@@ -10,6 +10,7 @@ export default function KasaTablePage() {
       tableNumber={Number(params.number)}
       backHref="/kasa"
       unauthorizedHref="/login"
+      cashier
     />
   );
 }

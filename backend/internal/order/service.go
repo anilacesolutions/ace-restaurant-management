@@ -188,6 +188,38 @@ func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.Obj
 	return order, nil
 }
 
+// CloseTable settles the table's open order: marks it closed, stamps the time
+// and payment method, and frees the table. Returns the closed order.
+func (s *Service) CloseTable(ctx context.Context, restaurantID bson.ObjectID, tableNumber int, paymentMethod string, now time.Time) (*domain.Order, error) {
+	existing, err := s.ActiveOrder(ctx, restaurantID, tableNumber)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, ErrValidation{"Bu masada açık hesap yok"}
+	}
+
+	res := s.coll().FindOneAndUpdate(ctx,
+		bson.M{"_id": existing.ID, "restaurantId": restaurantID},
+		bson.M{"$set": bson.M{
+			"status":        domain.OrderClosed,
+			"paymentMethod": paymentMethod,
+			"closedAt":      now,
+			"updatedAt":     now,
+		}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+	var closed domain.Order
+	if err := res.Decode(&closed); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrValidation{"Bu masada açık hesap yok"}
+		}
+		return nil, fmt.Errorf("close order: %w", err)
+	}
+	s.publishTableUpdate(restaurantID, &closed)
+	return &closed, nil
+}
+
 func (s *Service) menuByID(ctx context.Context, restaurantID bson.ObjectID, ids []bson.ObjectID) (map[string]domain.MenuItem, error) {
 	cur, err := s.db.Collection("menuItems").Find(ctx, bson.M{
 		"restaurantId": restaurantID,

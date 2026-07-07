@@ -21,12 +21,12 @@ const (
 type OrderItemStatus string
 
 const (
-	ItemNew       OrderItemStatus = "new"       // just added, not sent to kitchen yet
-	ItemSent      OrderItemStatus = "sent"      // sent to kitchen
-	ItemReady     OrderItemStatus = "ready"     // kitchen finished
-	ItemServed    OrderItemStatus = "served"
-	ItemVoided    OrderItemStatus = "voided"    // before "sent" — silent removal
-	ItemRefunded  OrderItemStatus = "refunded"  // after "sent" — needs reason
+	ItemNew      OrderItemStatus = "new"   // just added, not sent to kitchen yet
+	ItemSent     OrderItemStatus = "sent"  // sent to kitchen
+	ItemReady    OrderItemStatus = "ready" // kitchen finished
+	ItemServed   OrderItemStatus = "served"
+	ItemVoided   OrderItemStatus = "voided"   // before "sent" — silent removal
+	ItemRefunded OrderItemStatus = "refunded" // after "sent" — needs reason
 )
 
 // Order is per table, per session — closes at payment.
@@ -41,10 +41,13 @@ type Order struct {
 
 	// Totals are recomputed every time items change. Persisted to support
 	// fast reads in lists and reports.
-	Subtotal     Kurus               `bson:"subtotal" json:"subtotal"`
-	KDVBreakdown map[string]Kurus    `bson:"kdvBreakdown" json:"kdvBreakdown"` // key = "10", "20"
-	OTV          Kurus               `bson:"otv" json:"otv"`
-	GrandTotal   Kurus               `bson:"grandTotal" json:"grandTotal"`
+	Subtotal     Kurus            `bson:"subtotal" json:"subtotal"`
+	KDVBreakdown map[string]Kurus `bson:"kdvBreakdown" json:"kdvBreakdown"` // key = "10", "20"
+	OTV          Kurus            `bson:"otv" json:"otv"`
+	GrandTotal   Kurus            `bson:"grandTotal" json:"grandTotal"`
+
+	// PaymentMethod is set when the cashier closes the table ("nakit", "kart").
+	PaymentMethod string `bson:"paymentMethod,omitempty" json:"paymentMethod,omitempty"`
 
 	OpenedAt  time.Time  `bson:"openedAt" json:"openedAt"`
 	ClosedAt  *time.Time `bson:"closedAt,omitempty" json:"closedAt,omitempty"`
@@ -57,18 +60,18 @@ type OrderItem struct {
 	ID         bson.ObjectID `bson:"_id" json:"id"`
 	MenuItemID bson.ObjectID `bson:"menuItemId" json:"menuItemId"`
 
-	Name             string `bson:"name" json:"name"`           // snapshot
+	Name             string `bson:"name" json:"name"` // snapshot
 	Qty              int    `bson:"qty" json:"qty"`
-	UnitPrice        Kurus  `bson:"unitPrice" json:"unitPrice"` // snapshot, KDV-included
-	KDVOrani         int    `bson:"kdvOrani" json:"kdvOrani"`           // snapshot
-	OTVVar           bool   `bson:"otvVar" json:"otvVar"`               // snapshot
+	UnitPrice        Kurus  `bson:"unitPrice" json:"unitPrice"`               // snapshot, KDV-included
+	KDVOrani         int    `bson:"kdvOrani" json:"kdvOrani"`                 // snapshot
+	OTVVar           bool   `bson:"otvVar" json:"otvVar"`                     // snapshot
 	POSDepartmanKodu string `bson:"posDepartmanKodu" json:"posDepartmanKodu"` // snapshot
 
 	Note   string          `bson:"note,omitempty" json:"note,omitempty"`
 	Status OrderItemStatus `bson:"status" json:"status"`
 
-	AddedAt  time.Time  `bson:"addedAt" json:"addedAt"`
+	AddedAt  time.Time     `bson:"addedAt" json:"addedAt"`
 	AddedBy  bson.ObjectID `bson:"addedBy" json:"addedBy"` // waiter id
-	VoidedAt *time.Time `bson:"voidedAt,omitempty" json:"voidedAt,omitempty"`
-	VoidNote string     `bson:"voidNote,omitempty" json:"voidNote,omitempty"`
+	VoidedAt *time.Time    `bson:"voidedAt,omitempty" json:"voidedAt,omitempty"`
+	VoidNote string        `bson:"voidNote,omitempty" json:"voidNote,omitempty"`
 }
