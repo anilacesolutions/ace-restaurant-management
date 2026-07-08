@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { formatTRY } from "@/lib/money";
+import { ADISYON_LOGO } from "@/lib/adisyonLogo";
 import type {
   CategoryWithItems,
   MenuItem,
@@ -503,7 +504,7 @@ function printAdisyon(order: Order, tableNumber: number) {
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px; color: #111; width: 300px; }
-  h1 { font-size: 16px; text-align: center; margin: 0 0 2px; letter-spacing: .5px; }
+  .logo { display: block; margin: 0 auto 4px; width: 190px; max-width: 80%; }
   .sub { text-align: center; font-size: 11px; color: #555; margin-bottom: 10px; }
   hr { border: none; border-top: 1px dashed #999; margin: 8px 0; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -516,7 +517,7 @@ function printAdisyon(order: Order, tableNumber: number) {
   .foot { text-align: center; font-size: 11px; color: #555; margin-top: 12px; }
 </style></head>
 <body onload="window.print()">
-  <h1>GÜN GÜZEL BAHÇE</h1>
+  <img class="logo" src="${ADISYON_LOGO}" alt="Gün Güzelbahçe">
   <div class="sub">Masa ${tableNumber} · ${now}</div>
   <hr>
   <table>${rows}</table>
