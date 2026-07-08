@@ -269,7 +269,9 @@ function ItemFormSheet({
     setBusy(true);
     try {
       const body = JSON.stringify({
-        categoryName: f.categoryName,
+        // A fiks menü always lives in its own "Fiks Menü" section, not in a
+        // food category — keeps it separate from the meze/salata it includes.
+        categoryName: f.isFix ? "Fiks Menü" : f.categoryName,
         name: f.name,
         price: fromTL(tl),
         kdvOrani: f.kdvOrani,
@@ -352,32 +354,40 @@ function ItemFormSheet({
           )}
         </Field>
 
-        {/* Kategori */}
-        <Field label="Kategori">
-          <input
-            value={f.categoryName}
-            onChange={(e) => set("categoryName", e.target.value)}
-            placeholder="orn. Meze, Ana Yemek, Icecek"
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
-          />
-          {categoryNames.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {categoryNames.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => set("categoryName", n)}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium active:bg-amber-100 ${
-                    f.categoryName === n
-                      ? "bg-amber-700 text-white"
-                      : "bg-zinc-100 text-zinc-700"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          )}
-        </Field>
+        {/* Kategori — fiks menuler otomatik "Fiks Menu" kategorisine gider */}
+        {f.isFix ? (
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Bu bir <strong>Fiks menu</strong> — otomatik olarak{" "}
+            <strong>&quot;Fiks Menu&quot;</strong> kategorisinde gosterilir. (Icerigini
+            asagida tanimla.)
+          </div>
+        ) : (
+          <Field label="Kategori">
+            <input
+              value={f.categoryName}
+              onChange={(e) => set("categoryName", e.target.value)}
+              placeholder="orn. Meze, Ana Yemek, Icecek"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+            />
+            {categoryNames.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {categoryNames.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => set("categoryName", n)}
+                    className={`rounded-full px-3 py-1.5 text-sm font-medium active:bg-amber-100 ${
+                      f.categoryName === n
+                        ? "bg-amber-700 text-white"
+                        : "bg-zinc-100 text-zinc-700"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Field>
+        )}
 
         {/* Urun adi */}
         <Field label="Urun adi">
