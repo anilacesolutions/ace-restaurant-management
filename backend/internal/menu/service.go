@@ -126,6 +126,29 @@ type ItemInput struct {
 	KitchenPrint     bool         `json:"kitchenPrint"`
 	ImageURL         string       `json:"imageUrl"`
 	Available        bool         `json:"available"`
+
+	// Fiks menü: when IsFix, FixIncludes defines the composition (category +
+	// count per person).
+	IsFix       bool              `json:"isFix"`
+	FixIncludes []FixIncludeInput `json:"fixIncludes"`
+}
+
+type FixIncludeInput struct {
+	CategoryID string `json:"categoryId"`
+	Count      int    `json:"count"`
+}
+
+// fixComponents maps the validated input to domain (nil when not a fix).
+func (in *ItemInput) fixComponents() []domain.FixComponent {
+	if !in.IsFix {
+		return nil
+	}
+	out := make([]domain.FixComponent, 0, len(in.FixIncludes))
+	for _, c := range in.FixIncludes {
+		id, _ := bson.ObjectIDFromHex(c.CategoryID) // validated in normalizeAndValidate
+		out = append(out, domain.FixComponent{CategoryID: id, Count: c.Count})
+	}
+	return out
 }
 
 var posKoduRe = regexp.MustCompile(`^[A-H]$`)
@@ -151,6 +174,19 @@ func (in *ItemInput) normalizeAndValidate() error {
 	}
 	if in.POSDepartmanKodu != "" && !posKoduRe.MatchString(in.POSDepartmanKodu) {
 		return ErrValidation{"POS departman kodu A-H arası olmalı"}
+	}
+	if in.IsFix {
+		if len(in.FixIncludes) == 0 {
+			return ErrValidation{"Fiks menü için en az bir içerik satırı gerekli"}
+		}
+		for _, c := range in.FixIncludes {
+			if c.Count <= 0 {
+				return ErrValidation{"Fiks içerik adedi 0'dan büyük olmalı"}
+			}
+			if _, err := bson.ObjectIDFromHex(c.CategoryID); err != nil {
+				return ErrValidation{"Fiks içerik kategorisi geçersiz"}
+			}
+		}
 	}
 	return nil
 }
@@ -220,6 +256,8 @@ func (s *Service) CreateItem(ctx context.Context, restaurantID bson.ObjectID, in
 		SortOrder:        int(n),
 		KitchenPrint:     in.KitchenPrint,
 		ImageURL:         in.ImageURL,
+		IsFix:            in.IsFix,
+		FixIncludes:      in.fixComponents(),
 	}
 	if _, err := items.InsertOne(ctx, item); err != nil {
 		return nil, fmt.Errorf("insert item: %w", err)
@@ -249,6 +287,8 @@ func (s *Service) UpdateItem(ctx context.Context, restaurantID, itemID bson.Obje
 		"available":        in.Available,
 		"kitchenPrint":     in.KitchenPrint,
 		"imageUrl":         in.ImageURL,
+		"isFix":            in.IsFix,
+		"fixIncludes":      in.fixComponents(),
 	}}
 	res := items.FindOneAndUpdate(ctx,
 		bson.M{"_id": itemID, "restaurantId": restaurantID},

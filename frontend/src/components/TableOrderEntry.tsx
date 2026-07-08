@@ -20,6 +20,15 @@ interface DraftLine {
   note?: string;
 }
 
+// A fiks menü bundle held in the draft: the fix item, the people count, and the
+// chosen included items (which will be billed at 0).
+interface FixEntry {
+  key: string;
+  fix: MenuItem;
+  qty: number;
+  includes: { item: MenuItem; qty: number }[];
+}
+
 // TableOrderEntry is the table screen shared by the waiter (/garson/masa/[n])
 // and the cashier (/kasa/masa/[n]). It opens on the current adisyon (the orders
 // already placed); "Yeni Sipariş" switches to the full menu to add more.
@@ -41,7 +50,9 @@ export function TableOrderEntry({
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<"adisyon" | "menu">("adisyon");
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
+  const [fixDraft, setFixDraft] = useState<FixEntry[]>([]);
   const [picking, setPicking] = useState<MenuItem | null>(null);
+  const [pickingFix, setPickingFix] = useState<MenuItem | null>(null);
   const [showDraft, setShowDraft] = useState(false);
   const [showClose, setShowClose] = useState(false);
   const [sending, setSending] = useState(false);
@@ -49,6 +60,7 @@ export function TableOrderEntry({
   const [error, setError] = useState<string | null>(null);
 
   const draftKey = `order-draft-masa-${tableNumber}`;
+  const fixDraftKey = `order-fixdraft-masa-${tableNumber}`;
 
   function guard(e: unknown) {
     if (e instanceof ApiError && e.status === 401) {
@@ -80,6 +92,8 @@ export function TableOrderEntry({
     try {
       const raw = localStorage.getItem(draftKey);
       if (raw) setDraft(JSON.parse(raw));
+      const rawFix = localStorage.getItem(fixDraftKey);
+      if (rawFix) setFixDraft(JSON.parse(rawFix));
     } catch {
       /* ignore corrupt draft */
     }
@@ -94,6 +108,14 @@ export function TableOrderEntry({
     }
   }, [draft, draftKey]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(fixDraftKey, JSON.stringify(fixDraft));
+    } catch {
+      /* ignore */
+    }
+  }, [fixDraft, fixDraftKey]);
+
   const draftLines = useMemo(() => Object.values(draft), [draft]);
   const draftCount = useMemo(
     () => draftLines.reduce((s, l) => s + l.qty, 0),
@@ -103,6 +125,28 @@ export function TableOrderEntry({
     () => draftLines.reduce((s, l) => s + l.item.price * l.qty, 0),
     [draftLines],
   );
+  const fixDraftTotal = useMemo(
+    () => fixDraft.reduce((s, f) => s + f.fix.price * f.qty, 0),
+    [fixDraft],
+  );
+  const totalDraftAmount = draftTotal + fixDraftTotal;
+  const totalDraftCount =
+    draftCount + fixDraft.reduce((s, f) => s + f.qty, 0);
+  const hasDraft = draftLines.length > 0 || fixDraft.length > 0;
+
+  function addFix(
+    fix: MenuItem,
+    qty: number,
+    includes: { item: MenuItem; qty: number }[],
+  ) {
+    setFixDraft((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), fix, qty, includes },
+    ]);
+  }
+  function removeFix(key: string) {
+    setFixDraft((prev) => prev.filter((f) => f.key !== key));
+  }
 
   function addToDraft(item: MenuItem, qty: number, note?: string) {
     setDraft((prev) => {
@@ -127,25 +171,31 @@ export function TableOrderEntry({
   }
 
   async function send() {
-    if (draftLines.length === 0) return;
+    if (!hasDraft) return;
     setSending(true);
     setError(null);
     try {
+      const items = [
+        ...draftLines.map((l) => ({
+          menuItemId: l.item.id,
+          qty: l.qty,
+          note: l.note ?? "",
+        })),
+        ...fixDraft.map((f) => ({
+          menuItemId: f.fix.id,
+          qty: f.qty,
+          fixIncludedItemIds: f.includes.flatMap((inc) =>
+            Array<string>(inc.qty).fill(inc.item.id),
+          ),
+        })),
+      ];
       const r = await api<OrderResponse>(
         `/api/v1/orders/table/${tableNumber}/items`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            items: draftLines.map((l) => ({
-              menuItemId: l.item.id,
-              qty: l.qty,
-              note: l.note ?? "",
-            })),
-          }),
-        },
+        { method: "POST", body: JSON.stringify({ items }) },
       );
       setOrder(r.order);
       setDraft({});
+      setFixDraft([]);
       setShowDraft(false);
       setView("adisyon"); // back to the tab so the fresh items are visible
     } catch (e) {
@@ -166,6 +216,7 @@ export function TableOrderEntry({
       // Clear any leftover draft and leave — the table is free now.
       try {
         localStorage.removeItem(draftKey);
+        localStorage.removeItem(fixDraftKey);
       } catch {
         /* ignore */
       }
@@ -191,12 +242,16 @@ export function TableOrderEntry({
         menu={menu ?? []}
         order={order}
         draft={draft}
-        draftCount={draftCount}
-        draftTotal={draftTotal}
+        draftLines={draftLines}
+        fixDraft={fixDraft}
+        totalCount={totalDraftCount}
+        totalAmount={totalDraftAmount}
+        hasDraft={hasDraft}
         sending={sending}
         error={error}
         onBack={() => setView("adisyon")}
         onPick={setPicking}
+        onPickFix={setPickingFix}
         onOpenDraft={() => setShowDraft(true)}
         onSend={send}
         picking={picking}
@@ -205,10 +260,16 @@ export function TableOrderEntry({
           if (picking) addToDraft(picking, qty, note);
           setPicking(null);
         }}
+        pickingFix={pickingFix}
+        onCloseFixPick={() => setPickingFix(null)}
+        onAddFix={(qty, includes) => {
+          if (pickingFix) addFix(pickingFix, qty, includes);
+          setPickingFix(null);
+        }}
         showDraft={showDraft}
-        draftLines={draftLines}
         onCloseDraft={() => setShowDraft(false)}
         onQty={setDraftQty}
+        onRemoveFix={removeFix}
       />
     );
   }
@@ -542,41 +603,55 @@ function MenuView({
   menu,
   order,
   draft,
-  draftCount,
-  draftTotal,
+  draftLines,
+  fixDraft,
+  totalCount,
+  totalAmount,
+  hasDraft,
   sending,
   error,
   onBack,
   onPick,
+  onPickFix,
   onOpenDraft,
   onSend,
   picking,
   onClosePick,
   onAdd,
+  pickingFix,
+  onCloseFixPick,
+  onAddFix,
   showDraft,
-  draftLines,
   onCloseDraft,
   onQty,
+  onRemoveFix,
 }: {
   tableNumber: number;
   menu: CategoryWithItems[];
   order: Order | null;
   draft: Record<string, DraftLine>;
-  draftCount: number;
-  draftTotal: number;
+  draftLines: DraftLine[];
+  fixDraft: FixEntry[];
+  totalCount: number;
+  totalAmount: number;
+  hasDraft: boolean;
   sending: boolean;
   error: string | null;
   onBack: () => void;
   onPick: (it: MenuItem) => void;
+  onPickFix: (it: MenuItem) => void;
   onOpenDraft: () => void;
   onSend: () => void;
   picking: MenuItem | null;
   onClosePick: () => void;
   onAdd: (qty: number, note?: string) => void;
+  pickingFix: MenuItem | null;
+  onCloseFixPick: () => void;
+  onAddFix: (qty: number, includes: { item: MenuItem; qty: number }[]) => void;
   showDraft: boolean;
-  draftLines: DraftLine[];
   onCloseDraft: () => void;
   onQty: (itemId: string, qty: number) => void;
+  onRemoveFix: (key: string) => void;
 }) {
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 pb-32">
@@ -643,19 +718,24 @@ function MenuView({
                   return (
                     <li key={it.id}>
                       <button
-                        onClick={() => onPick(it)}
+                        onClick={() => (it.isFix ? onPickFix(it) : onPick(it))}
                         className="flex min-h-[72px] w-full items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-left shadow-sm active:bg-zinc-50"
                       >
                         <div className="flex flex-col">
-                          <span className="text-base font-medium text-zinc-900">
+                          <span className="flex items-center gap-2 text-base font-medium text-zinc-900">
                             {it.name}
+                            {it.isFix && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">
+                                Fiks
+                              </span>
+                            )}
                           </span>
                           <span className="mt-0.5 text-xs text-zinc-500">
-                            KDV %{it.kdvOrani}
+                            {it.isFix ? "kişi başı" : `KDV %${it.kdvOrani}`}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          {inDraft > 0 && (
+                          {!it.isFix && inDraft > 0 && (
                             <span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-700 px-2 text-sm font-bold text-white">
                               {inDraft}
                             </span>
@@ -674,7 +754,7 @@ function MenuView({
         ))}
       </div>
 
-      {draftLines.length > 0 && (
+      {hasDraft && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white p-3 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
           <div className="mx-auto flex max-w-3xl items-center gap-3">
             <button
@@ -682,10 +762,10 @@ function MenuView({
               className="flex flex-1 flex-col text-left"
             >
               <span className="text-xs text-zinc-500">
-                Sepet · {draftCount} ürün
+                Sepet · {totalCount} ürün
               </span>
               <span className="text-lg font-bold tabular-nums text-zinc-900">
-                {formatTRY(draftTotal)}
+                {formatTRY(totalAmount)}
               </span>
             </button>
             <button
@@ -703,13 +783,24 @@ function MenuView({
         <QtyModal item={picking} onClose={onClosePick} onAdd={onAdd} />
       )}
 
+      {pickingFix && (
+        <FixWizard
+          fix={pickingFix}
+          menu={menu}
+          onCancel={onCloseFixPick}
+          onConfirm={onAddFix}
+        />
+      )}
+
       {showDraft && (
         <DraftSheet
           lines={draftLines}
-          total={draftTotal}
+          fixes={fixDraft}
+          total={totalAmount}
           sending={sending}
           onClose={onCloseDraft}
           onQty={onQty}
+          onRemoveFix={onRemoveFix}
           onSend={onSend}
         />
       )}
@@ -797,17 +888,21 @@ function QtyModal({
 
 function DraftSheet({
   lines,
+  fixes,
   total,
   sending,
   onClose,
   onQty,
+  onRemoveFix,
   onSend,
 }: {
   lines: DraftLine[];
+  fixes: FixEntry[];
   total: number;
   sending: boolean;
   onClose: () => void;
   onQty: (itemId: string, qty: number) => void;
+  onRemoveFix: (key: string) => void;
   onSend: () => void;
 }) {
   return (
@@ -864,6 +959,43 @@ function DraftSheet({
             </span>
           </div>
         ))}
+
+        {fixes.map((f) => (
+          <div
+            key={f.key}
+            className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 shadow-sm"
+          >
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="flex items-center gap-2 text-base font-semibold text-zinc-900">
+                {f.fix.name}
+                <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">
+                  Fiks
+                </span>
+              </span>
+              <span className="text-xs text-zinc-600">
+                {f.qty} kişi × {formatTRY(f.fix.price)}
+              </span>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {f.includes.map((inc) => (
+                  <li key={inc.item.id} className="text-xs text-zinc-500">
+                    + {inc.qty}× {inc.item.name} (0 ₺)
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <span className="text-base font-semibold tabular-nums text-zinc-900">
+                {formatTRY(f.fix.price * f.qty)}
+              </span>
+              <button
+                onClick={() => onRemoveFix(f.key)}
+                className="text-sm font-medium text-red-700 active:opacity-70"
+              >
+                Kaldir
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="border-t border-zinc-200 p-4">
@@ -882,6 +1014,172 @@ function DraftSheet({
             {sending ? "Gönderiliyor..." : "Mutfağa Gönder"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Fiks menü wizard ----------------------------------------------------
+
+function FixWizard({
+  fix,
+  menu,
+  onCancel,
+  onConfirm,
+}: {
+  fix: MenuItem;
+  menu: CategoryWithItems[];
+  onCancel: () => void;
+  onConfirm: (qty: number, includes: { item: MenuItem; qty: number }[]) => void;
+}) {
+  const [qty, setQty] = useState(1); // people
+  const [sel, setSel] = useState<Record<string, number>>({}); // itemId -> count
+
+  const components = fix.fixIncludes ?? [];
+  const catItems = (id: string) => menu.find((c) => c.id === id)?.items ?? [];
+  const catName = (id: string) => menu.find((c) => c.id === id)?.name ?? "?";
+  const currentFor = (id: string) =>
+    catItems(id).reduce((s, it) => s + (sel[it.id] ?? 0), 0);
+
+  function bump(itemId: string, delta: number) {
+    setSel((prev) => {
+      const next = Math.max(0, (prev[itemId] ?? 0) + delta);
+      const copy = { ...prev };
+      if (next === 0) delete copy[itemId];
+      else copy[itemId] = next;
+      return copy;
+    });
+  }
+
+  const allMet = components.every(
+    (c) => currentFor(c.categoryId) === c.count * qty,
+  );
+
+  function confirm() {
+    if (!allMet) return;
+    const allItems = menu.flatMap((c) => c.items);
+    const includes = Object.entries(sel)
+      .map(([itemId, count]) => {
+        const item = allItems.find((i) => i.id === itemId);
+        return item ? { item, qty: count } : null;
+      })
+      .filter((x): x is { item: MenuItem; qty: number } => x !== null);
+    onConfirm(qty, includes);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-white">
+      <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <button
+          onClick={onCancel}
+          className="rounded-full px-3 py-2 text-sm font-medium text-zinc-600 active:bg-zinc-100"
+        >
+          İptal
+        </button>
+        <h2 className="truncate px-2 text-base font-semibold text-zinc-900">
+          {fix.name}
+        </h2>
+        <span className="w-14" />
+      </header>
+
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-4 pb-28">
+        {/* Kişi sayısı */}
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-zinc-700">Kişi sayısı</span>
+          <div className="flex items-center justify-center gap-6">
+            <button
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-zinc-100 text-3xl font-bold text-zinc-700 active:bg-zinc-200"
+            >
+              −
+            </button>
+            <span className="w-14 text-center text-4xl font-bold tabular-nums text-zinc-900">
+              {qty}
+            </span>
+            <button
+              onClick={() => setQty((q) => q + 1)}
+              className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-700 text-3xl font-bold text-white active:bg-amber-800"
+            >
+              +
+            </button>
+          </div>
+          <p className="text-center text-sm text-zinc-500">
+            {qty} × {formatTRY(fix.price)} ={" "}
+            <span className="font-semibold text-zinc-900">
+              {formatTRY(fix.price * qty)}
+            </span>
+          </p>
+        </div>
+
+        {/* Her kategori için seçim */}
+        {components.map((c) => {
+          const need = c.count * qty;
+          const cur = currentFor(c.categoryId);
+          const done = cur === need;
+          return (
+            <div key={c.categoryId} className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-zinc-800">
+                  {catName(c.categoryId)}
+                </span>
+                <span
+                  className={`text-sm font-bold tabular-nums ${
+                    done ? "text-green-700" : "text-amber-700"
+                  }`}
+                >
+                  {cur} / {need}
+                </span>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {catItems(c.categoryId).map((it) => {
+                  const n = sel[it.id] ?? 0;
+                  const full = cur >= need;
+                  return (
+                    <li
+                      key={it.id}
+                      className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-2.5 shadow-sm"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-base text-zinc-900">
+                        {it.name}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => bump(it.id, -1)}
+                          disabled={n === 0}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-xl font-bold text-zinc-700 active:bg-zinc-200 disabled:opacity-30"
+                        >
+                          −
+                        </button>
+                        <span className="w-6 text-center text-base font-bold tabular-nums">
+                          {n}
+                        </span>
+                        <button
+                          onClick={() => bump(it.id, 1)}
+                          disabled={full}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-700 text-xl font-bold text-white active:bg-amber-800 disabled:opacity-30"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="border-t border-zinc-200 p-4">
+        <button
+          onClick={confirm}
+          disabled={!allMet}
+          className="w-full rounded-full bg-amber-700 py-3.5 text-base font-semibold text-white shadow-sm active:bg-amber-800 disabled:opacity-40"
+        >
+          {allMet
+            ? `Sepete Ekle · ${formatTRY(fix.price * qty)}`
+            : "İçeriği tamamla"}
+        </button>
       </div>
     </div>
   );

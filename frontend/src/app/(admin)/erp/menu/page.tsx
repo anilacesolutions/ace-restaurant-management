@@ -124,6 +124,7 @@ export default function ErpMenuPage() {
         <ItemFormSheet
           item={editing === "new" ? null : editing}
           categoryNames={categoryNames}
+          categories={(cats ?? []).map((c) => ({ id: c.id, name: c.name }))}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
@@ -165,6 +166,11 @@ function Thumb({ url, name }: { url?: string; name: string }) {
 
 // ---- Form sheet ----------------------------------------------------------
 
+interface FixRow {
+  categoryId: string;
+  count: number;
+}
+
 interface FormState {
   categoryName: string;
   name: string;
@@ -175,16 +181,20 @@ interface FormState {
   kitchenPrint: boolean;
   available: boolean;
   imageUrl: string;
+  isFix: boolean;
+  fixIncludes: FixRow[];
 }
 
 function ItemFormSheet({
   item,
   categoryNames,
+  categories,
   onClose,
   onSaved,
 }: {
   item: MenuItem | null;
   categoryNames: string[];
+  categories: { id: string; name: string }[];
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
@@ -198,6 +208,12 @@ function ItemFormSheet({
     kitchenPrint: item?.kitchenPrint ?? true,
     available: item?.available ?? true,
     imageUrl: item?.imageUrl ?? "",
+    isFix: item?.isFix ?? false,
+    fixIncludes:
+      item?.fixIncludes?.map((c) => ({
+        categoryId: c.categoryId,
+        count: c.count,
+      })) ?? [],
   }));
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -245,6 +261,11 @@ function ItemFormSheet({
       setError("Gecerli bir fiyat gir");
       return;
     }
+    const fixRows = f.fixIncludes.filter((r) => r.categoryId && r.count > 0);
+    if (f.isFix && fixRows.length === 0) {
+      setError("Fiks menü için en az bir içerik satırı ekle (kategori + adet)");
+      return;
+    }
     setBusy(true);
     try {
       const body = JSON.stringify({
@@ -257,6 +278,8 @@ function ItemFormSheet({
         kitchenPrint: f.kitchenPrint,
         available: f.available,
         imageUrl: f.imageUrl,
+        isFix: f.isFix,
+        fixIncludes: f.isFix ? fixRows : [],
       });
       if (item) {
         await api(`/api/v1/menu/items/${item.id}`, { method: "PATCH", body });
@@ -385,6 +408,115 @@ function ItemFormSheet({
             onChange={(v) => set("kdvOrani", v)}
           />
         </Field>
+
+        {/* Fiks menü */}
+        <Toggle
+          label="Fiks menü (set menü)"
+          desc="Acarsan bu urun bir set menu olur. Siparis edilince asagidaki icerik kadar urun secilir ve adisyona 0 TL olarak eklenir. Fiyat kisi basidir."
+          value={f.isFix}
+          onChange={(v) => set("isFix", v)}
+        />
+        {f.isFix && (
+          <Field label="Fiks icerigi (kisi basina)">
+            <div className="flex flex-col gap-3">
+              {f.fixIncludes.length === 0 && (
+                <p className="text-sm text-zinc-400">
+                  Henuz icerik yok. Asagidan ekle (orn. Meze x2, Salata x1).
+                </p>
+              )}
+              {f.fixIncludes.map((row, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl border border-zinc-200 bg-zinc-50 p-3"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-medium text-zinc-500">
+                      Kategori
+                    </span>
+                    <button
+                      onClick={() =>
+                        set(
+                          "fixIncludes",
+                          f.fixIncludes.filter((_, j) => j !== i),
+                        )
+                      }
+                      className="text-sm font-medium text-red-700 active:opacity-70"
+                    >
+                      Kaldir
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() =>
+                          set(
+                            "fixIncludes",
+                            f.fixIncludes.map((r, j) =>
+                              j === i ? { ...r, categoryId: c.id } : r,
+                            ),
+                          )
+                        }
+                        className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                          row.categoryId === c.id
+                            ? "bg-amber-700 text-white"
+                            : "border border-zinc-300 bg-white text-zinc-700"
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center gap-3">
+                    <span className="text-sm text-zinc-600">Adet:</span>
+                    <button
+                      onClick={() =>
+                        set(
+                          "fixIncludes",
+                          f.fixIncludes.map((r, j) =>
+                            j === i
+                              ? { ...r, count: Math.max(1, r.count - 1) }
+                              : r,
+                          ),
+                        )
+                      }
+                      className="h-9 w-9 rounded-lg bg-zinc-200 text-xl font-bold text-zinc-700 active:bg-zinc-300"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-lg font-bold tabular-nums">
+                      {row.count}
+                    </span>
+                    <button
+                      onClick={() =>
+                        set(
+                          "fixIncludes",
+                          f.fixIncludes.map((r, j) =>
+                            j === i ? { ...r, count: r.count + 1 } : r,
+                          ),
+                        )
+                      }
+                      className="h-9 w-9 rounded-lg bg-zinc-200 text-xl font-bold text-zinc-700 active:bg-zinc-300"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={() =>
+                  set("fixIncludes", [
+                    ...f.fixIncludes,
+                    { categoryId: "", count: 1 },
+                  ])
+                }
+                className="rounded-xl border border-dashed border-amber-400 py-2.5 text-sm font-semibold text-amber-800 active:bg-amber-50"
+              >
+                + Kategori ekle
+              </button>
+            </div>
+          </Field>
+        )}
 
         {/* POS departman kodu */}
         <Field label="POS departman kodu (yazar kasa, opsiyonel)">

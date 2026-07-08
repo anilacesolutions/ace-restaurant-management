@@ -87,11 +87,14 @@ func (s *Service) ListActive(ctx context.Context, restaurantID bson.ObjectID) ([
 	return out, nil
 }
 
-// AddItemInput is one line the waiter fires to the kitchen.
+// AddItemInput is one line the waiter fires to the kitchen. For a fiks menü
+// item, FixIncludedItemIDs carries the chosen included items (menu item ids,
+// repeats allowed) — they are added at price 0 and linked to the fix line.
 type AddItemInput struct {
-	MenuItemID string `json:"menuItemId"`
-	Qty        int    `json:"qty"`
-	Note       string `json:"note"`
+	MenuItemID         string   `json:"menuItemId"`
+	Qty                int      `json:"qty"`
+	Note               string   `json:"note"`
+	FixIncludedItemIDs []string `json:"fixIncludedItemIds"`
 }
 
 // AddItems opens the table's order if needed, appends the given items (snapshot
@@ -102,7 +105,8 @@ func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.Obj
 		return nil, ErrValidation{"En az bir ürün ekleyin"}
 	}
 
-	// Snapshot menu items so later menu edits don't rewrite history.
+	// Snapshot menu items so later menu edits don't rewrite history. Collect all
+	// referenced ids up front (line items + any fix-included items).
 	ids := make([]bson.ObjectID, 0, len(ins))
 	for _, in := range ins {
 		id, err := bson.ObjectIDFromHex(in.MenuItemID)
@@ -110,6 +114,13 @@ func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.Obj
 			return nil, ErrValidation{"Geçersiz ürün"}
 		}
 		ids = append(ids, id)
+		for _, inc := range in.FixIncludedItemIDs {
+			id, err := bson.ObjectIDFromHex(inc)
+			if err != nil {
+				return nil, ErrValidation{"Geçersiz fiks içeriği"}
+			}
+			ids = append(ids, id)
+		}
 	}
 	menu, err := s.menuByID(ctx, restaurantID, ids)
 	if err != nil {
@@ -124,6 +135,14 @@ func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.Obj
 		mi, ok := menu[in.MenuItemID]
 		if !ok {
 			return nil, ErrValidation{"Ürün bulunamadı: " + in.MenuItemID}
+		}
+		if mi.IsFix {
+			fixItems, err := buildFix(in, mi, menu, subjectID, now)
+			if err != nil {
+				return nil, err
+			}
+			newItems = append(newItems, fixItems...)
+			continue
 		}
 		newItems = append(newItems, domain.OrderItem{
 			ID:               bson.NewObjectID(),
@@ -218,6 +237,76 @@ func (s *Service) CloseTable(ctx context.Context, restaurantID bson.ObjectID, ta
 	}
 	s.publishTableUpdate(restaurantID, &closed)
 	return &closed, nil
+}
+
+// buildFix turns a fiks menü line into a priced parent OrderItem plus its
+// included (0-priced) items, after validating that the chosen items match the
+// fix's composition (each category needs count×people items, nothing extra).
+func buildFix(in AddItemInput, fixMI domain.MenuItem, menu map[string]domain.MenuItem, subjectID bson.ObjectID, now time.Time) ([]domain.OrderItem, error) {
+	people := in.Qty
+
+	perCategory := map[bson.ObjectID]int{}
+	perItem := map[string]int{}
+	itemOrder := make([]string, 0, len(in.FixIncludedItemIDs))
+	for _, incID := range in.FixIncludedItemIDs {
+		mi, ok := menu[incID]
+		if !ok {
+			return nil, ErrValidation{"Fiks içeriği bulunamadı"}
+		}
+		perCategory[mi.CategoryID]++
+		if perItem[incID] == 0 {
+			itemOrder = append(itemOrder, incID)
+		}
+		perItem[incID]++
+	}
+
+	required := 0
+	for _, comp := range fixMI.FixIncludes {
+		need := comp.Count * people
+		required += need
+		if perCategory[comp.CategoryID] != need {
+			return nil, ErrValidation{"Fiks içeriği eksik ya da fazla — her kategoriden doğru sayıda ürün seçin"}
+		}
+	}
+	if len(in.FixIncludedItemIDs) != required {
+		return nil, ErrValidation{"Fiks içeriğinde beklenmeyen ürün var"}
+	}
+
+	fixLineID := bson.NewObjectID()
+	out := make([]domain.OrderItem, 0, 1+len(itemOrder))
+	out = append(out, domain.OrderItem{
+		ID:               fixLineID,
+		MenuItemID:       fixMI.ID,
+		Name:             fixMI.Name,
+		Qty:              people,
+		UnitPrice:        fixMI.Price,
+		KDVOrani:         fixMI.KDVOrani,
+		OTVVar:           fixMI.OTVVar,
+		POSDepartmanKodu: fixMI.POSDepartmanKodu,
+		Note:             in.Note,
+		Status:           domain.ItemSent,
+		AddedAt:          now,
+		AddedBy:          subjectID,
+		IsFix:            true,
+	})
+	for _, incID := range itemOrder {
+		mi := menu[incID]
+		out = append(out, domain.OrderItem{
+			ID:               bson.NewObjectID(),
+			MenuItemID:       mi.ID,
+			Name:             mi.Name,
+			Qty:              perItem[incID],
+			UnitPrice:        0,
+			KDVOrani:         mi.KDVOrani,
+			OTVVar:           mi.OTVVar,
+			POSDepartmanKodu: mi.POSDepartmanKodu,
+			Status:           domain.ItemSent,
+			AddedAt:          now,
+			AddedBy:          subjectID,
+			FixGroupID:       fixLineID,
+		})
+	}
+	return out, nil
 }
 
 func (s *Service) menuByID(ctx context.Context, restaurantID bson.ObjectID, ids []bson.ObjectID) (map[string]domain.MenuItem, error) {

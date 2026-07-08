@@ -36,4 +36,18 @@ type MenuItem struct {
 	// Prints on the kitchen ticket. Empty for things the kitchen doesn't make
 	// (e.g. bottled drinks), so the bridge can skip the kitchen ticket.
 	KitchenPrint bool `bson:"kitchenPrint" json:"kitchenPrint"`
+
+	// Fiks menü (prix-fixe). When IsFix, ordering this item requires choosing
+	// the included items per FixIncludes; those go on the order at price 0. The
+	// fix line itself carries Price (per person). FixIncludes is category-based:
+	// e.g. [{Meze, 2}, {Salata, 1}] = 2 mezes + 1 salad per person.
+	IsFix       bool           `bson:"isFix,omitempty" json:"isFix"`
+	FixIncludes []FixComponent `bson:"fixIncludes,omitempty" json:"fixIncludes,omitempty"`
+}
+
+// FixComponent is one line of a fiks menü's composition: Count items from
+// Category, per person (multiplied by the fix quantity when ordered).
+type FixComponent struct {
+	CategoryID bson.ObjectID `bson:"categoryId" json:"categoryId"`
+	Count      int           `bson:"count" json:"count"`
 }

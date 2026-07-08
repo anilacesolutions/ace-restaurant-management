@@ -70,6 +70,11 @@ type OrderItem struct {
 	Note   string          `bson:"note,omitempty" json:"note,omitempty"`
 	Status OrderItemStatus `bson:"status" json:"status"`
 
+	// Fiks menü linkage. IsFix marks the priced parent line; FixGroupID links an
+	// included (0-priced) item to that parent line's ID for grouping/removal.
+	IsFix      bool          `bson:"isFix,omitempty" json:"isFix,omitempty"`
+	FixGroupID bson.ObjectID `bson:"fixGroupId,omitempty" json:"fixGroupId,omitempty"`
+
 	AddedAt  time.Time     `bson:"addedAt" json:"addedAt"`
 	AddedBy  bson.ObjectID `bson:"addedBy" json:"addedBy"` // waiter id
 	VoidedAt *time.Time    `bson:"voidedAt,omitempty" json:"voidedAt,omitempty"`

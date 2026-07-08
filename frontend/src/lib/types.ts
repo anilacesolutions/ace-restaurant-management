@@ -41,6 +41,8 @@ export interface OrderItem {
   status: OrderItemStatus;
   addedAt: string;
   addedBy: string;
+  isFix?: boolean;
+  fixGroupId?: string;
 }
 
 export interface Order {
@@ -68,6 +70,11 @@ export interface ActiveOrdersResponse {
   orders: Order[];
 }
 
+export interface FixComponent {
+  categoryId: string;
+  count: number;
+}
+
 export interface MenuItem {
   id: string;
   restaurantId: string;
@@ -82,6 +89,8 @@ export interface MenuItem {
   available: boolean;
   sortOrder: number;
   kitchenPrint: boolean;
+  isFix?: boolean;
+  fixIncludes?: FixComponent[];
 }
 
 export interface CategoryWithItems extends MenuCategory {
