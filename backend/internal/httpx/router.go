@@ -31,18 +31,17 @@ func NewRouter(allowedOrigins []string) *chi.Mux {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
-	if len(allowedOrigins) > 0 {
-		opts.AllowedOrigins = allowedOrigins
-		// Also accept LAN origins in addition to the explicit list — useful
-		// when CORS_ALLOWED_ORIGINS pins a prod host but dev hits the same
-		// binary from a LAN device.
-		opts.AllowOriginFunc = func(_ *http.Request, origin string) bool {
-			return devLANOrigin.MatchString(origin)
+	// go-chi/cors IGNORES AllowedOrigins entirely when AllowOriginFunc is set,
+	// so the func must itself allow BOTH the configured origins (prod, e.g.
+	// https://kasa.gunguzelbahce.online) AND any LAN origin (dev phone on WiFi).
+	// Setting only AllowedOrigins + a LAN func silently drops the prod origin.
+	opts.AllowOriginFunc = func(_ *http.Request, origin string) bool {
+		for _, o := range allowedOrigins {
+			if o == origin {
+				return true
+			}
 		}
-	} else {
-		opts.AllowOriginFunc = func(_ *http.Request, origin string) bool {
-			return devLANOrigin.MatchString(origin)
-		}
+		return devLANOrigin.MatchString(origin)
 	}
 	r.Use(cors.Handler(opts))
 
