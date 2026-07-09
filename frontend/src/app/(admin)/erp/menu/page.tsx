@@ -198,6 +198,8 @@ function ItemFormSheet({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [f, setF] = useState<FormState>(() => ({
     categoryName: "",
     name: item?.name ?? "",
@@ -251,6 +253,20 @@ function ItemFormSheet({
       }
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function remove() {
+    if (!item) return;
+    setError(null);
+    setDeleting(true);
+    try {
+      await api(`/api/v1/menu/items/${item.id}`, { method: "DELETE" });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   }
 
@@ -568,7 +584,51 @@ function ItemFormSheet({
           value={f.otvVar}
           onChange={(v) => set("otvVar", v)}
         />
+
+        {/* Silme — sadece mevcut urunde */}
+        {item && (
+          <div className="mt-4 border-t border-zinc-200 pt-5">
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={busy || deleting}
+              className="w-full rounded-xl border border-red-300 bg-red-50 py-3 text-base font-semibold text-red-700 active:bg-red-100 disabled:opacity-50"
+            >
+              Urunu Sil
+            </button>
+            <p className="mt-2 text-center text-xs text-zinc-400">
+              Urun menuden kalkar. Gecmis adisyonlar etkilenmez.
+            </p>
+          </div>
+        )}
       </div>
+
+      {confirmDelete && item && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">Urunu sil?</h3>
+            <p className="mt-2 text-sm text-zinc-600">
+              <strong>{item.name}</strong> menuden kalicak olarak silinecek. Bu
+              islem geri alinamaz.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="flex-1 rounded-xl border border-zinc-300 bg-white py-3 text-base font-semibold text-zinc-700 active:bg-zinc-50 disabled:opacity-50"
+              >
+                Vazgec
+              </button>
+              <button
+                onClick={remove}
+                disabled={deleting}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-base font-semibold text-white active:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Siliniyor..." : "Sil"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

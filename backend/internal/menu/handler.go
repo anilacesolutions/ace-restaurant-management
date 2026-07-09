@@ -37,6 +37,7 @@ func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/menu/admin", h.listAll)
 	r.Post("/menu/items", h.createItem)
 	r.Patch("/menu/items/{id}", h.updateItem)
+	r.Delete("/menu/items/{id}", h.deleteItem)
 	r.Post("/menu/images/presign", h.presignImage)
 }
 
@@ -89,6 +90,19 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) deleteItem(w http.ResponseWriter, r *http.Request) {
+	id, err := bson.ObjectIDFromHex(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz id")
+		return
+	}
+	if err := h.svc.DeleteItem(r.Context(), h.restaurantID, id); err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // presignImageRequest asks for a short-lived upload URL for one image.

@@ -265,6 +265,21 @@ func (s *Service) CreateItem(ctx context.Context, restaurantID bson.ObjectID, in
 	return &item, nil
 }
 
+// DeleteItem permanently removes an item. Existing orders snapshot the item
+// onto their lines, so deleting from the menu never rewrites order history.
+func (s *Service) DeleteItem(ctx context.Context, restaurantID, itemID bson.ObjectID) error {
+	res, err := s.db.Collection("menuItems").DeleteOne(ctx,
+		bson.M{"_id": itemID, "restaurantId": restaurantID},
+	)
+	if err != nil {
+		return fmt.Errorf("delete item: %w", err)
+	}
+	if res.DeletedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdateItem replaces the editable fields of an existing item.
 func (s *Service) UpdateItem(ctx context.Context, restaurantID, itemID bson.ObjectID, in ItemInput) (*domain.MenuItem, error) {
 	if err := in.normalizeAndValidate(); err != nil {
