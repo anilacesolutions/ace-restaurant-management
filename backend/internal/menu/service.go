@@ -105,9 +105,15 @@ func assemble(cats []domain.MenuCategory, items []domain.MenuItem) []CategoryWit
 	}
 	out := make([]CategoryWithItems, 0, len(cats))
 	for _, c := range cats {
+		its := itemsByCat[c.ID]
+		if its == nil {
+			// A category with no items must serialize as [] not null, or the
+			// client crashes doing items.length / items.map on it.
+			its = []domain.MenuItem{}
+		}
 		out = append(out, CategoryWithItems{
 			MenuCategory: c,
-			Items:        itemsByCat[c.ID],
+			Items:        its,
 		})
 	}
 	return out

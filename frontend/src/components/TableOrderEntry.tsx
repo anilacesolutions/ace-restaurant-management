@@ -709,11 +709,11 @@ function MenuView({
             className="flex scroll-mt-4 flex-col gap-3"
           >
             <h2 className="text-lg font-semibold text-zinc-900">{cat.name}</h2>
-            {cat.items.length === 0 ? (
+            {(cat.items ?? []).length === 0 ? (
               <p className="text-sm text-zinc-500">Bu kategoride urun yok.</p>
             ) : (
               <ul className="grid gap-2 sm:grid-cols-2">
-                {cat.items.map((it) => {
+                {(cat.items ?? []).map((it) => {
                   const inDraft = draft[it.id]?.qty ?? 0;
                   return (
                     <li key={it.id}>
@@ -1057,7 +1057,7 @@ function FixWizard({
 
   function confirm() {
     if (!allMet) return;
-    const allItems = menu.flatMap((c) => c.items);
+    const allItems = menu.flatMap((c) => c.items ?? []);
     const includes = Object.entries(sel)
       .map(([itemId, count]) => {
         const item = allItems.find((i) => i.id === itemId);
