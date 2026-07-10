@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const sections = [
   { href: "/erp/masalar", title: "Masalar", desc: "Masa ekle, kaldir" },
+  { href: "/erp/garsonlar", title: "Garsonlar", desc: "Garson ekle, duzenle, sil" },
   { href: "/erp/menu", title: "Menu", desc: "Kategori ve urunler" },
   { href: "/erp/giderler", title: "Giderler", desc: "Gider defteri, alimlar" },
   { href: "/erp/raporlar", title: "Raporlar", desc: "Gunluk, haftalik satis" },

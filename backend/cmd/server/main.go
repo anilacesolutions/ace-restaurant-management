@@ -168,7 +168,7 @@ func main() {
 			menuH.MountAdmin(r)
 			orderH.MountAdmin(r)
 			tablesH.MountAdmin(r)
-			waitersH.Mount(r)
+			waitersH.MountAdmin(r)
 			expenseH.MountAdmin(r)
 			authH.MountAdmin(r)
 		})
