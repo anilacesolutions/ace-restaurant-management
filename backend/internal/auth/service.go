@@ -26,6 +26,11 @@ const AdminIdleTimeout = 30 * time.Minute
 // QRTokenTTL is how long a freshly issued QR remains scannable.
 const QRTokenTTL = 5 * time.Minute
 
+// WaiterSessionTTL is how long a waiter stays logged in after scanning the QR.
+// Fixed window from login (replaces the old 03:00 rollover, which cut waiters
+// off mid- or late-shift).
+const WaiterSessionTTL = 24 * time.Hour
+
 // Service owns auth-related collections (users, sessions, qrLoginTokens) and
 // the in-restaurant timezone for waiter rollover math.
 type Service struct {
@@ -242,7 +247,7 @@ func (s *Service) ExchangeQR(ctx context.Context, token string) (domain.Session,
 		Kind:         domain.SessionWaiter,
 		SubjectID:    qr.WaiterID,
 		Token:        sessTok,
-		ExpiresAt:    NextRollover(now, s.tz),
+		ExpiresAt:    now.Add(WaiterSessionTTL),
 		LastSeenAt:   now,
 		CreatedAt:    now,
 	}
