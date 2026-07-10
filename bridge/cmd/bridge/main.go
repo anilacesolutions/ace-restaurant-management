@@ -13,6 +13,7 @@ import (
 	"github.com/ace-solutions/restaurant-bridge/internal/config"
 	"github.com/ace-solutions/restaurant-bridge/internal/mqttx"
 	"github.com/ace-solutions/restaurant-bridge/internal/printer"
+	"github.com/joho/godotenv"
 )
 
 // kitchenPrintMsg is the wire format the backend publishes on
@@ -45,6 +46,10 @@ type adisyonPrintMsg struct {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	// Load a .env sitting next to the binary if present (Windows convenience —
+	// the operator just drops a .env beside the .exe). Real env vars still win.
+	_ = godotenv.Load()
 
 	cfg, err := config.Load()
 	if err != nil {
