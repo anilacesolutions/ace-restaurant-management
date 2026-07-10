@@ -239,6 +239,7 @@ export function TableOrderEntry({
     return (
       <MenuView
         tableNumber={tableNumber}
+        cashier={cashier}
         menu={menu ?? []}
         order={order}
         draft={draft}
@@ -600,6 +601,7 @@ function printAdisyon(order: Order, tableNumber: number) {
 
 function MenuView({
   tableNumber,
+  cashier,
   menu,
   order,
   draft,
@@ -627,6 +629,7 @@ function MenuView({
   onRemoveFix,
 }: {
   tableNumber: number;
+  cashier: boolean;
   menu: CategoryWithItems[];
   order: Order | null;
   draft: Record<string, DraftLine>;
@@ -794,6 +797,7 @@ function MenuView({
 
       {showDraft && (
         <DraftSheet
+          cashier={cashier}
           lines={draftLines}
           fixes={fixDraft}
           total={totalAmount}
@@ -887,6 +891,7 @@ function QtyModal({
 // ---- Draft review sheet --------------------------------------------------
 
 function DraftSheet({
+  cashier,
   lines,
   fixes,
   total,
@@ -896,6 +901,7 @@ function DraftSheet({
   onRemoveFix,
   onSend,
 }: {
+  cashier: boolean;
   lines: DraftLine[];
   fixes: FixEntry[];
   total: number;
@@ -918,6 +924,12 @@ function DraftSheet({
         <span className="w-16" />
       </header>
 
+      {!cashier && (
+        <p className="border-b border-zinc-100 bg-amber-50 px-4 py-2 text-center text-xs text-amber-800">
+          Yanlış eklediysen kasaya söyle — sepetten çıkarma kasada yapılır.
+        </p>
+      )}
+
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
         {lines.map((l) => (
           <div
@@ -936,13 +948,15 @@ function DraftSheet({
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => onQty(l.item.id, l.qty - 1)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-2xl font-bold text-zinc-700 active:bg-zinc-200"
-                aria-label="Azalt"
-              >
-                −
-              </button>
+              {cashier && (
+                <button
+                  onClick={() => onQty(l.item.id, l.qty - 1)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-2xl font-bold text-zinc-700 active:bg-zinc-200"
+                  aria-label="Azalt"
+                >
+                  −
+                </button>
+              )}
               <span className="w-8 text-center text-lg font-bold tabular-nums">
                 {l.qty}
               </span>
@@ -987,12 +1001,14 @@ function DraftSheet({
               <span className="text-base font-semibold tabular-nums text-zinc-900">
                 {formatTRY(f.fix.price * f.qty)}
               </span>
-              <button
-                onClick={() => onRemoveFix(f.key)}
-                className="text-sm font-medium text-red-700 active:opacity-70"
-              >
-                Kaldir
-              </button>
+              {cashier && (
+                <button
+                  onClick={() => onRemoveFix(f.key)}
+                  className="text-sm font-medium text-red-700 active:opacity-70"
+                >
+                  Kaldir
+                </button>
+              )}
             </div>
           </div>
         ))}
