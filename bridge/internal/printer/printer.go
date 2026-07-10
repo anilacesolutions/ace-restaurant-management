@@ -28,14 +28,18 @@ type Printer struct {
 	mode Mode
 	addr string
 	cols int
+	logo bool // print the embedded logo bitmap atop the adisyon
 }
 
 func New(mode Mode, addr string, cols int) *Printer {
 	if cols <= 0 {
 		cols = 32
 	}
-	return &Printer{mode: mode, addr: addr, cols: cols}
+	return &Printer{mode: mode, addr: addr, cols: cols, logo: true}
 }
+
+// SetLogo toggles the logo header on the adisyon (PRINTER_LOGO).
+func (p *Printer) SetLogo(on bool) { p.logo = on }
 
 // --- kitchen ticket -------------------------------------------------------
 
@@ -115,6 +119,11 @@ func (p *Printer) PrintReceipt(r Receipt) error {
 func (p *Printer) formatReceipt(r Receipt) []byte {
 	var b strings.Builder
 	p.init(&b)
+
+	// Logo bitmap header (real printers only; skip for stdout dev view).
+	if p.logo && p.mode != ModeStdout {
+		b.Write(LogoRaster())
+	}
 
 	dash := strings.Repeat("-", p.cols)
 	eq := strings.Repeat("=", p.cols)

@@ -16,6 +16,7 @@ type Config struct {
 	PrinterMode string // "windows", "usb", "network", "stdout" (dev)
 	PrinterAddr string // windows: printer name; network: host:port; usb: device path
 	PrinterCols int    // characters per line (58mm=32, 80mm=48)
+	PrinterLogo bool   // print the logo bitmap atop the adisyon (default true)
 }
 
 func Load() (*Config, error) {
@@ -29,6 +30,7 @@ func Load() (*Config, error) {
 		PrinterMode:    getEnv("PRINTER_MODE", "stdout"),
 		PrinterAddr:    os.Getenv("PRINTER_ADDR"),
 		PrinterCols:    getEnvInt("PRINTER_COLS", 32),
+		PrinterLogo:    getEnv("PRINTER_LOGO", "true") != "false",
 	}
 	if cfg.RestaurantID == "" {
 		return nil, fmt.Errorf("RESTAURANT_ID is required")

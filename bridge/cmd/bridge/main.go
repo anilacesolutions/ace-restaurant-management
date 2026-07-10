@@ -61,6 +61,7 @@ func main() {
 	defer stop()
 
 	prn := printer.New(printer.Mode(cfg.PrinterMode), cfg.PrinterAddr, cfg.PrinterCols)
+	prn.SetLogo(cfg.PrinterLogo)
 
 	mq, err := mqttx.Connect(mqttx.Config{
 		Broker:   cfg.MQTTBroker,
