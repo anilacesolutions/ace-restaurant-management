@@ -36,6 +36,11 @@ func KitchenPrint(restaurantID string) string {
 	return fmt.Sprintf("restaurant/%s/kitchen/print", restaurantID)
 }
 
+// CashierPrint carries the customer adisyon (receipt) to the register bridge.
+func CashierPrint(restaurantID string) string {
+	return fmt.Sprintf("restaurant/%s/cashier/print", restaurantID)
+}
+
 func POSCharge(restaurantID string) string {
 	return fmt.Sprintf("restaurant/%s/pos/charge", restaurantID)
 }

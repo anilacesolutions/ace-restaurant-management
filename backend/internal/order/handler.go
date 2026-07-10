@@ -35,9 +35,27 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Delete("/orders/table/{number}/items/{itemId}", h.voidItem)
 }
 
-// MountAdmin mounts cashier-only order actions (settle/close a table).
+// MountAdmin mounts cashier-only order actions (settle/close a table, print).
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Post("/orders/table/{number}/close", h.closeTable)
+	r.Post("/orders/table/{number}/print", h.printAdisyon)
+}
+
+func (h *Handler) printAdisyon(w http.ResponseWriter, r *http.Request) {
+	tableNo, ok := parseTable(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.PrintAdisyon(r.Context(), h.restaurantID, tableNo); err != nil {
+		var verr ErrValidation
+		if errors.As(err, &verr) {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Msg)
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type closeReq struct {

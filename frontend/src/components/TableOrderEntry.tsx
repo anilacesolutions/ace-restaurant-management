@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { formatTRY } from "@/lib/money";
-import { ADISYON_LOGO } from "@/lib/adisyonLogo";
 import type {
   CategoryWithItems,
   FixComponent,
@@ -216,6 +215,19 @@ export function TableOrderEntry({
     setOrder(r.order);
   }
 
+  const [printNotice, setPrintNotice] = useState<string | null>(null);
+  async function printAdisyon() {
+    setError(null);
+    setPrintNotice(null);
+    try {
+      await api(`/api/v1/orders/table/${tableNumber}/print`, { method: "POST" });
+      setPrintNotice("Adisyon yazıcıya gönderildi");
+      window.setTimeout(() => setPrintNotice(null), 3000);
+    } catch (e) {
+      guard(e);
+    }
+  }
+
   async function closeTable(paymentMethod: string) {
     setClosing(true);
     setError(null);
@@ -293,8 +305,9 @@ export function TableOrderEntry({
         backHref={backHref}
         error={error}
         cashier={cashier}
+        notice={printNotice}
         onNewOrder={() => setView("menu")}
-        onPrint={() => order && printAdisyon(order, tableNumber)}
+        onPrint={printAdisyon}
         onClose={() => setShowClose(true)}
         onVoid={voidItem}
       />
@@ -319,6 +332,7 @@ function AdisyonView({
   backHref,
   error,
   cashier,
+  notice,
   onNewOrder,
   onPrint,
   onClose,
@@ -329,6 +343,7 @@ function AdisyonView({
   backHref: string;
   error: string | null;
   cashier: boolean;
+  notice: string | null;
   onNewOrder: () => void;
   onPrint: () => void;
   onClose: () => void;
@@ -389,6 +404,12 @@ function AdisyonView({
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+          {notice}
         </div>
       )}
 
@@ -619,76 +640,6 @@ function CloseModal({
       </div>
     </div>
   );
-}
-
-// ---- Print adisyon (browser print — NOT the thermal bridge) --------------
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function printAdisyon(order: Order, tableNumber: number) {
-  const items = order.items.filter(
-    (it) => it.status !== "voided" && it.status !== "refunded",
-  );
-  const now = new Date().toLocaleString("tr-TR", {
-    timeZone: "Europe/Istanbul",
-  });
-  const rows = items
-    .map(
-      (it) =>
-        `<tr><td class="q">${it.qty}×</td><td class="n">${escapeHtml(
-          it.name,
-        )}</td><td class="r">${formatTRY(it.unitPrice * it.qty)}</td></tr>`,
-    )
-    .join("");
-  const kdv = Object.entries(order.kdvBreakdown ?? {})
-    .filter(([, v]) => v > 0)
-    .map(
-      ([rate, v]) =>
-        `<div class="row sm"><span>KDV %${rate}</span><span>${formatTRY(
-          v,
-        )}</span></div>`,
-    )
-    .join("");
-
-  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<title>Adisyon - Masa ${tableNumber}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px; color: #111; width: 300px; }
-  .logo { display: block; margin: 0 auto 4px; width: 190px; max-width: 80%; }
-  .sub { text-align: center; font-size: 11px; color: #555; margin-bottom: 10px; }
-  hr { border: none; border-top: 1px dashed #999; margin: 8px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  td { padding: 3px 0; vertical-align: top; }
-  td.q { width: 28px; font-weight: 700; }
-  td.r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-  .row.sm { color: #555; }
-  .total { font-size: 16px; font-weight: 800; }
-  .foot { text-align: center; font-size: 11px; color: #555; margin-top: 12px; }
-</style></head>
-<body onload="window.print()">
-  <img class="logo" src="${ADISYON_LOGO}" alt="Gün Güzelbahçe">
-  <div class="sub">Masa ${tableNumber} · ${now}</div>
-  <hr>
-  <table>${rows}</table>
-  <hr>
-  ${kdv}
-  <div class="row total"><span>TOPLAM</span><span>${formatTRY(
-    order.grandTotal,
-  )}</span></div>
-  <div class="foot">Afiyet olsun · Bu bir adisyondur, mali belge değildir.</div>
-</body></html>`;
-
-  const w = window.open("", "_blank", "width=340,height=640");
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
 }
 
 // ---- Menu view (add items) -----------------------------------------------

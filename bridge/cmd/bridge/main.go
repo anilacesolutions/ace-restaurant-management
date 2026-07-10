@@ -28,6 +28,20 @@ type kitchenPrintMsg struct {
 	} `json:"items"`
 }
 
+// adisyonPrintMsg is the wire format the backend publishes on
+// restaurant/{id}/cashier/print (customer bill). Money is integer kuruş.
+type adisyonPrintMsg struct {
+	TableNumber int `json:"tableNumber"`
+	Items       []struct {
+		Qty       int    `json:"qty"`
+		Name      string `json:"name"`
+		LineTotal int64  `json:"lineTotal"`
+		Note      string `json:"note,omitempty"`
+	} `json:"items"`
+	KDV        map[string]int64 `json:"kdv"`
+	GrandTotal int64            `json:"grandTotal"`
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -85,7 +99,43 @@ func main() {
 		slog.Error("subscribe failed", "topic", topic, "err", err)
 		os.Exit(1)
 	}
-	slog.Info("bridge ready", "restaurant", cfg.RestaurantID, "topic", topic, "printer", cfg.PrinterMode)
+
+	// Customer adisyon (receipt) — the cashier's "Adisyon Bas".
+	adisyonTopic := fmt.Sprintf("restaurant/%s/cashier/print", cfg.RestaurantID)
+	err = mq.Subscribe(adisyonTopic, 1, func(_ string, payload []byte) {
+		var msg adisyonPrintMsg
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			slog.Error("bad adisyon payload", "err", err)
+			return
+		}
+		receipt := printer.Receipt{
+			RestaurantName: cfg.RestaurantName,
+			TableNumber:    msg.TableNumber,
+			KDV:            msg.KDV,
+			GrandTotal:     msg.GrandTotal,
+			PrintedAt:      time.Now(),
+		}
+		for _, it := range msg.Items {
+			receipt.Items = append(receipt.Items, printer.ReceiptLine{
+				Qty:       it.Qty,
+				Name:      it.Name,
+				LineTotal: it.LineTotal,
+				Note:      it.Note,
+			})
+		}
+		if err := prn.PrintReceipt(receipt); err != nil {
+			slog.Error("adisyon print failed", "table", msg.TableNumber, "err", err)
+			return
+		}
+		slog.Info("adisyon printed", "table", msg.TableNumber, "items", len(msg.Items))
+	})
+	if err != nil {
+		slog.Error("subscribe failed", "topic", adisyonTopic, "err", err)
+		os.Exit(1)
+	}
+
+	slog.Info("bridge ready", "restaurant", cfg.RestaurantID,
+		"kitchen", topic, "adisyon", adisyonTopic, "printer", cfg.PrinterMode)
 
 	<-ctx.Done()
 	slog.Info("shutting down")

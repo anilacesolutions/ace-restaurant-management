@@ -242,6 +242,63 @@ func (s *Service) CloseTable(ctx context.Context, restaurantID bson.ObjectID, ta
 // ErrItemNotFound is returned when the order line to void does not exist.
 var ErrItemNotFound = errors.New("order item not found")
 
+// adisyonPrint is the wire format published on cashier/print for the register
+// bridge. Money is integer kuruş. Keep in sync with bridge adisyonPrintMsg.
+type adisyonPrint struct {
+	TableNumber int                     `json:"tableNumber"`
+	Items       []adisyonLine           `json:"items"`
+	KDV         map[string]domain.Kurus `json:"kdv"`
+	GrandTotal  domain.Kurus            `json:"grandTotal"`
+}
+
+type adisyonLine struct {
+	Qty       int          `json:"qty"`
+	Name      string       `json:"name"`
+	LineTotal domain.Kurus `json:"lineTotal"`
+	Note      string       `json:"note,omitempty"`
+}
+
+// PrintAdisyon publishes the table's current bill to the register bridge, which
+// prints the thermal receipt. Non-priced fiks-included lines are included (like
+// the on-screen adisyon); voided lines are skipped.
+func (s *Service) PrintAdisyon(ctx context.Context, restaurantID bson.ObjectID, tableNumber int) error {
+	if s.pub == nil {
+		return ErrValidation{"Yazıcı servisi kapalı (MQTT yok)"}
+	}
+	existing, err := s.ActiveOrder(ctx, restaurantID, tableNumber)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return ErrValidation{"Bu masada açık hesap yok"}
+	}
+
+	msg := adisyonPrint{
+		TableNumber: tableNumber,
+		KDV:         existing.KDVBreakdown,
+		GrandTotal:  existing.GrandTotal,
+	}
+	for _, it := range existing.Items {
+		if it.Status == domain.ItemVoided || it.Status == domain.ItemRefunded {
+			continue
+		}
+		msg.Items = append(msg.Items, adisyonLine{
+			Qty:       it.Qty,
+			Name:      it.Name,
+			LineTotal: it.UnitPrice * domain.Kurus(it.Qty),
+			Note:      it.Note,
+		})
+	}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("adisyon marshal: %w", err)
+	}
+	if err := s.pub.Publish(mqttx.CashierPrint(restaurantID.Hex()), mqttx.QoSAtLeastOnce, false, payload); err != nil {
+		return fmt.Errorf("adisyon publish: %w", err)
+	}
+	return nil
+}
+
 // VoidItem cancels one line on a table's active order (customer changed their
 // mind). Both waiter and cashier may call this. The line stays on the order as
 // status=voided (audit: who/when), and totals are recomputed without it. If the

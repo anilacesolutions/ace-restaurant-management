@@ -6,27 +6,29 @@ import (
 )
 
 type Config struct {
-	RestaurantID string
-	MQTTBroker   string
-	MQTTClientID string
-	MQTTUsername string
-	MQTTPassword string
+	RestaurantID   string
+	RestaurantName string // printed as the adisyon header (e.g. "GUN GUZELBAHCE")
+	MQTTBroker     string
+	MQTTClientID   string
+	MQTTUsername   string
+	MQTTPassword   string
 
-	PrinterMode string // "usb", "network", "stdout" (dev)
-	PrinterAddr string // network: host:port; usb: device path
-	PrinterCols int    // characters per line (e.g. 32, 42, 48)
+	PrinterMode string // "windows", "usb", "network", "stdout" (dev)
+	PrinterAddr string // windows: printer name; network: host:port; usb: device path
+	PrinterCols int    // characters per line (58mm=32, 80mm=48)
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		RestaurantID: os.Getenv("RESTAURANT_ID"),
-		MQTTBroker:   os.Getenv("MQTT_BROKER"),
-		MQTTClientID: getEnv("MQTT_CLIENT_ID", "restaurant-bridge"),
-		MQTTUsername: os.Getenv("MQTT_USERNAME"),
-		MQTTPassword: os.Getenv("MQTT_PASSWORD"),
-		PrinterMode:  getEnv("PRINTER_MODE", "stdout"),
-		PrinterAddr:  os.Getenv("PRINTER_ADDR"),
-		PrinterCols:  getEnvInt("PRINTER_COLS", 42),
+		RestaurantID:   os.Getenv("RESTAURANT_ID"),
+		RestaurantName: getEnv("RESTAURANT_NAME", "GUN GUZELBAHCE"),
+		MQTTBroker:     os.Getenv("MQTT_BROKER"),
+		MQTTClientID:   getEnv("MQTT_CLIENT_ID", "restaurant-bridge"),
+		MQTTUsername:   os.Getenv("MQTT_USERNAME"),
+		MQTTPassword:   os.Getenv("MQTT_PASSWORD"),
+		PrinterMode:    getEnv("PRINTER_MODE", "stdout"),
+		PrinterAddr:    os.Getenv("PRINTER_ADDR"),
+		PrinterCols:    getEnvInt("PRINTER_COLS", 32),
 	}
 	if cfg.RestaurantID == "" {
 		return nil, fmt.Errorf("RESTAURANT_ID is required")
