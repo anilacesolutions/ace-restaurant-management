@@ -239,6 +239,78 @@ func (s *Service) CloseTable(ctx context.Context, restaurantID bson.ObjectID, ta
 	return &closed, nil
 }
 
+// ErrItemNotFound is returned when the order line to void does not exist.
+var ErrItemNotFound = errors.New("order item not found")
+
+// VoidItem cancels one line on a table's active order (customer changed their
+// mind). Both waiter and cashier may call this. The line stays on the order as
+// status=voided (audit: who/when), and totals are recomputed without it. If the
+// line is part of a fiks menü, the whole bundle (priced parent + 0-priced
+// included items) is voided together.
+func (s *Service) VoidItem(ctx context.Context, restaurantID, subjectID bson.ObjectID, tableNumber int, itemID bson.ObjectID, now time.Time) (*domain.Order, error) {
+	existing, err := s.ActiveOrder(ctx, restaurantID, tableNumber)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, ErrValidation{"Bu masada açık hesap yok"}
+	}
+
+	var target *domain.OrderItem
+	for i := range existing.Items {
+		if existing.Items[i].ID == itemID {
+			target = &existing.Items[i]
+			break
+		}
+	}
+	if target == nil {
+		return nil, ErrItemNotFound
+	}
+	if target.Status == domain.ItemVoided || target.Status == domain.ItemRefunded {
+		return existing, nil // already cancelled — idempotent
+	}
+
+	// Which fiks group (if any) to void together: parent's own ID, or the group
+	// id an included line points at.
+	groupID := bson.NilObjectID
+	if target.IsFix {
+		groupID = target.ID
+	} else if !target.FixGroupID.IsZero() {
+		groupID = target.FixGroupID
+	}
+
+	for i := range existing.Items {
+		it := &existing.Items[i]
+		inGroup := it.ID == itemID
+		if groupID != bson.NilObjectID {
+			inGroup = it.ID == groupID || it.FixGroupID == groupID
+		}
+		if inGroup && it.Status != domain.ItemVoided && it.Status != domain.ItemRefunded {
+			it.Status = domain.ItemVoided
+			it.VoidedAt = &now
+			it.VoidedBy = subjectID
+		}
+	}
+
+	existing.UpdatedAt = now
+	applyTotals(existing)
+	if _, err := s.coll().UpdateOne(ctx,
+		bson.M{"_id": existing.ID, "restaurantId": restaurantID},
+		bson.M{"$set": bson.M{
+			"items":        existing.Items,
+			"subtotal":     existing.Subtotal,
+			"kdvBreakdown": existing.KDVBreakdown,
+			"otv":          existing.OTV,
+			"grandTotal":   existing.GrandTotal,
+			"updatedAt":    existing.UpdatedAt,
+		}},
+	); err != nil {
+		return nil, fmt.Errorf("void item: %w", err)
+	}
+	s.publishTableUpdate(restaurantID, existing)
+	return existing, nil
+}
+
 // buildFix turns a fiks menü line into a priced parent OrderItem plus its
 // included (0-priced) items, after validating that the chosen items match the
 // fix's composition (each category needs count×people items, nothing extra).

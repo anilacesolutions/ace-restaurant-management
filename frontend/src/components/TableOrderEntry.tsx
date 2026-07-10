@@ -12,6 +12,7 @@ import type {
   MenuItem,
   MenuResponse,
   Order,
+  OrderItem,
   OrderResponse,
 } from "@/lib/types";
 
@@ -206,6 +207,15 @@ export function TableOrderEntry({
     }
   }
 
+  async function voidItem(itemId: string) {
+    setError(null);
+    const r = await api<OrderResponse>(
+      `/api/v1/orders/table/${tableNumber}/items/${itemId}`,
+      { method: "DELETE" },
+    );
+    setOrder(r.order);
+  }
+
   async function closeTable(paymentMethod: string) {
     setClosing(true);
     setError(null);
@@ -286,6 +296,7 @@ export function TableOrderEntry({
         onNewOrder={() => setView("menu")}
         onPrint={() => order && printAdisyon(order, tableNumber)}
         onClose={() => setShowClose(true)}
+        onVoid={voidItem}
       />
       {showClose && order && (
         <CloseModal
@@ -311,6 +322,7 @@ function AdisyonView({
   onNewOrder,
   onPrint,
   onClose,
+  onVoid,
 }: {
   tableNumber: number;
   order: Order | null;
@@ -320,10 +332,35 @@ function AdisyonView({
   onNewOrder: () => void;
   onPrint: () => void;
   onClose: () => void;
+  onVoid: (itemId: string) => Promise<void>;
 }) {
+  const [pendingVoid, setPendingVoid] = useState<OrderItem | null>(null);
+  const [voiding, setVoiding] = useState(false);
+  const [voidError, setVoidError] = useState<string | null>(null);
+
+  // Included (0-priced) fiks lines are cancelled together with their parent —
+  // don't offer a separate cancel on them; act on the priced parent instead.
+  // Note: the backend serializes an unset fixGroupId as an all-zero ObjectID
+  // (Go omitempty doesn't drop zero ObjectIDs), so check against that.
+  const isIncludedFix = (it: OrderItem) =>
+    !!it.fixGroupId && it.fixGroupId !== "000000000000000000000000";
   const items = (order?.items ?? []).filter(
     (it) => it.status !== "voided" && it.status !== "refunded",
   );
+
+  async function confirmVoid() {
+    if (!pendingVoid) return;
+    setVoiding(true);
+    setVoidError(null);
+    try {
+      await onVoid(pendingVoid.id);
+      setPendingVoid(null);
+    } catch (e) {
+      setVoidError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setVoiding(false);
+    }
+  }
   const hasOrder = items.length > 0;
   const kdvLines = Object.entries(order?.kdvBreakdown ?? {}).filter(
     ([, v]) => v > 0,
@@ -391,6 +428,17 @@ function AdisyonView({
                 <span className="tabular-nums text-zinc-900">
                   {formatTRY(it.unitPrice * it.qty)}
                 </span>
+                {!isIncludedFix(it) && (
+                  <button
+                    onClick={() => {
+                      setVoidError(null);
+                      setPendingVoid(it);
+                    }}
+                    className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-red-700 active:bg-red-50"
+                  >
+                    İptal
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -444,6 +492,52 @@ function AdisyonView({
           </button>
         </div>
       </div>
+
+      {pendingVoid && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-4 sm:items-center"
+          onClick={() => !voiding && setPendingVoid(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-zinc-900">
+              Siparişi iptal et?
+            </h3>
+            <p className="mt-2 text-sm text-zinc-600">
+              <strong>
+                {pendingVoid.qty}× {pendingVoid.name}
+              </strong>{" "}
+              adisyondan çıkarılacak.
+              {pendingVoid.isFix
+                ? " Fiks menü içindekiler de birlikte iptal olur."
+                : ""}
+            </p>
+            {voidError && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {voidError}
+              </div>
+            )}
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setPendingVoid(null)}
+                disabled={voiding}
+                className="flex-1 rounded-xl border border-zinc-300 bg-white py-3 text-base font-semibold text-zinc-700 active:bg-zinc-50 disabled:opacity-50"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={confirmVoid}
+                disabled={voiding}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-base font-semibold text-white active:bg-red-700 disabled:opacity-50"
+              >
+                {voiding ? "İptal ediliyor..." : "İptal Et"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

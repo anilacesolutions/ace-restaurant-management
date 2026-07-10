@@ -78,5 +78,6 @@ type OrderItem struct {
 	AddedAt  time.Time     `bson:"addedAt" json:"addedAt"`
 	AddedBy  bson.ObjectID `bson:"addedBy" json:"addedBy"` // waiter id
 	VoidedAt *time.Time    `bson:"voidedAt,omitempty" json:"voidedAt,omitempty"`
+	VoidedBy bson.ObjectID `bson:"voidedBy,omitempty" json:"voidedBy,omitempty"` // who cancelled
 	VoidNote string        `bson:"voidNote,omitempty" json:"voidNote,omitempty"`
 }

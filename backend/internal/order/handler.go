@@ -32,6 +32,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/orders/active", h.listActive)
 	r.Get("/orders/table/{number}", h.activeForTable)
 	r.Post("/orders/table/{number}/items", h.addItems)
+	r.Delete("/orders/table/{number}/items/{itemId}", h.voidItem)
 }
 
 // MountAdmin mounts cashier-only order actions (settle/close a table).
@@ -114,6 +115,37 @@ func (h *Handler) addItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"order": o})
+}
+
+func (h *Handler) voidItem(w http.ResponseWriter, r *http.Request) {
+	tableNo, ok := parseTable(w, r)
+	if !ok {
+		return
+	}
+	itemID, err := bson.ObjectIDFromHex(chi.URLParam(r, "itemId"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz ürün id")
+		return
+	}
+	subjectID, _, ok := auth.SubjectFromCtx(r.Context())
+	if !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	o, err := h.svc.VoidItem(r.Context(), h.restaurantID, subjectID, tableNo, itemID, time.Now())
+	if err != nil {
+		var verr ErrValidation
+		switch {
+		case errors.As(err, &verr):
+			httpx.WriteError(w, http.StatusBadRequest, verr.Msg)
+		case errors.Is(err, ErrItemNotFound):
+			httpx.WriteError(w, http.StatusNotFound, "sipariş satırı bulunamadı")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"order": o})
