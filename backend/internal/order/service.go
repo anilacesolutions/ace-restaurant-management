@@ -294,16 +294,36 @@ func (s *Service) VoidItem(ctx context.Context, restaurantID, subjectID bson.Obj
 
 	existing.UpdatedAt = now
 	applyTotals(existing)
+
+	// If every line is now cancelled, the table is effectively empty — cancel
+	// the order so the floor frees the table instead of showing it occupied
+	// with a 0 total. Re-adding items later opens a fresh order.
+	anyLeft := false
+	for _, it := range existing.Items {
+		if it.Status != domain.ItemVoided && it.Status != domain.ItemRefunded {
+			anyLeft = true
+			break
+		}
+	}
+
+	set := bson.M{
+		"items":        existing.Items,
+		"subtotal":     existing.Subtotal,
+		"kdvBreakdown": existing.KDVBreakdown,
+		"otv":          existing.OTV,
+		"grandTotal":   existing.GrandTotal,
+		"updatedAt":    existing.UpdatedAt,
+	}
+	if !anyLeft {
+		existing.Status = domain.OrderCancelled
+		existing.ClosedAt = &now
+		set["status"] = domain.OrderCancelled
+		set["closedAt"] = now
+	}
+
 	if _, err := s.coll().UpdateOne(ctx,
 		bson.M{"_id": existing.ID, "restaurantId": restaurantID},
-		bson.M{"$set": bson.M{
-			"items":        existing.Items,
-			"subtotal":     existing.Subtotal,
-			"kdvBreakdown": existing.KDVBreakdown,
-			"otv":          existing.OTV,
-			"grandTotal":   existing.GrandTotal,
-			"updatedAt":    existing.UpdatedAt,
-		}},
+		bson.M{"$set": set},
 	); err != nil {
 		return nil, fmt.Errorf("void item: %w", err)
 	}
