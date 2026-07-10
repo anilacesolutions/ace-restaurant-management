@@ -8,6 +8,7 @@ import { formatTRY } from "@/lib/money";
 import { ADISYON_LOGO } from "@/lib/adisyonLogo";
 import type {
   CategoryWithItems,
+  FixComponent,
   MenuItem,
   MenuResponse,
   Order,
@@ -1040,6 +1041,10 @@ function FixWizard({
   const catName = (id: string) => menu.find((c) => c.id === id)?.name ?? "?";
   const currentFor = (id: string) =>
     catItems(id).reduce((s, it) => s + (sel[it.id] ?? 0), 0);
+  // Items needed for this component: count for every `perPeople` people,
+  // rounded up (e.g. 1 salata / 4 kişi, 6 kişi -> 2).
+  const needFor = (c: FixComponent) =>
+    c.count * Math.ceil(qty / Math.max(1, c.perPeople ?? 1));
 
   function bump(itemId: string, delta: number) {
     setSel((prev) => {
@@ -1052,7 +1057,7 @@ function FixWizard({
   }
 
   const allMet = components.every(
-    (c) => currentFor(c.categoryId) === c.count * qty,
+    (c) => currentFor(c.categoryId) === needFor(c),
   );
 
   function confirm() {
@@ -1113,7 +1118,7 @@ function FixWizard({
 
         {/* Her kategori için seçim */}
         {components.map((c) => {
-          const need = c.count * qty;
+          const need = needFor(c);
           const cur = currentFor(c.categoryId);
           const done = cur === need;
           return (

@@ -142,6 +142,7 @@ type ItemInput struct {
 type FixIncludeInput struct {
 	CategoryID string `json:"categoryId"`
 	Count      int    `json:"count"`
+	PerPeople  int    `json:"perPeople"` // items per N people; 0/1 = per person
 }
 
 // fixComponents maps the validated input to domain (nil when not a fix).
@@ -152,7 +153,11 @@ func (in *ItemInput) fixComponents() []domain.FixComponent {
 	out := make([]domain.FixComponent, 0, len(in.FixIncludes))
 	for _, c := range in.FixIncludes {
 		id, _ := bson.ObjectIDFromHex(c.CategoryID) // validated in normalizeAndValidate
-		out = append(out, domain.FixComponent{CategoryID: id, Count: c.Count})
+		per := c.PerPeople
+		if per < 1 {
+			per = 1
+		}
+		out = append(out, domain.FixComponent{CategoryID: id, Count: c.Count, PerPeople: per})
 	}
 	return out
 }

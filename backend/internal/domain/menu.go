@@ -46,8 +46,11 @@ type MenuItem struct {
 }
 
 // FixComponent is one line of a fiks menü's composition: Count items from
-// Category, per person (multiplied by the fix quantity when ordered).
+// Category for every PerPeople people (rounded up). PerPeople 1 (or 0, legacy)
+// means per person — e.g. {Meze, 2, 1} = 2 mezes per person; {Salata, 1, 4} =
+// 1 salad for every 4 people (6 people -> ceil(6/4)=2 salads).
 type FixComponent struct {
 	CategoryID bson.ObjectID `bson:"categoryId" json:"categoryId"`
 	Count      int           `bson:"count" json:"count"`
+	PerPeople  int           `bson:"perPeople,omitempty" json:"perPeople,omitempty"`
 }

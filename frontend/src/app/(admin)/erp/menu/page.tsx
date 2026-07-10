@@ -170,6 +170,7 @@ function Thumb({ url, name }: { url?: string; name: string }) {
 interface FixRow {
   categoryId: string;
   count: number;
+  perPeople: number; // her kaç kişiye (1 = kişi başı)
 }
 
 interface FormState {
@@ -216,6 +217,7 @@ function ItemFormSheet({
       item?.fixIncludes?.map((c) => ({
         categoryId: c.categoryId,
         count: c.count,
+        perPeople: c.perPeople && c.perPeople > 0 ? c.perPeople : 1,
       })) ?? [],
   }));
   const [busy, setBusy] = useState(false);
@@ -528,13 +530,54 @@ function ItemFormSheet({
                       +
                     </button>
                   </div>
+                  <div className="mt-3 flex items-center gap-3">
+                    <span className="text-sm text-zinc-600">Her</span>
+                    <button
+                      onClick={() =>
+                        set(
+                          "fixIncludes",
+                          f.fixIncludes.map((r, j) =>
+                            j === i
+                              ? { ...r, perPeople: Math.max(1, r.perPeople - 1) }
+                              : r,
+                          ),
+                        )
+                      }
+                      className="h-9 w-9 rounded-lg bg-zinc-200 text-xl font-bold text-zinc-700 active:bg-zinc-300"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center text-lg font-bold tabular-nums">
+                      {row.perPeople}
+                    </span>
+                    <button
+                      onClick={() =>
+                        set(
+                          "fixIncludes",
+                          f.fixIncludes.map((r, j) =>
+                            j === i ? { ...r, perPeople: r.perPeople + 1 } : r,
+                          ),
+                        )
+                      }
+                      className="h-9 w-9 rounded-lg bg-zinc-200 text-xl font-bold text-zinc-700 active:bg-zinc-300"
+                    >
+                      +
+                    </button>
+                    <span className="text-sm text-zinc-600">kişiye</span>
+                  </div>
+                  <p className="mt-2 text-xs text-amber-800">
+                    →{" "}
+                    {row.perPeople === 1
+                      ? `kişi başı ${row.count} adet`
+                      : `her ${row.perPeople} kişiye ${row.count} adet (küsurat yukarı yuvarlanır)`}
+                  </p>
                 </div>
               ))}
               <button
                 onClick={() =>
                   set("fixIncludes", [
                     ...f.fixIncludes,
-                    { categoryId: "", count: 1 },
+                    { categoryId: "", count: 1, perPeople: 1 },
                   ])
                 }
                 className="rounded-xl border border-dashed border-amber-400 py-2.5 text-sm font-semibold text-amber-800 active:bg-amber-50"

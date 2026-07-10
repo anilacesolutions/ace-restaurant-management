@@ -73,6 +73,7 @@ export interface ActiveOrdersResponse {
 export interface FixComponent {
   categoryId: string;
   count: number;
+  perPeople?: number; // items per N people; undefined/1 = per person
 }
 
 export interface MenuItem {

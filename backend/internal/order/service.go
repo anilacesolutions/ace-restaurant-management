@@ -262,7 +262,12 @@ func buildFix(in AddItemInput, fixMI domain.MenuItem, menu map[string]domain.Men
 
 	required := 0
 	for _, comp := range fixMI.FixIncludes {
-		need := comp.Count * people
+		per := comp.PerPeople
+		if per < 1 {
+			per = 1 // legacy / per-person
+		}
+		groups := (people + per - 1) / per // ceil(people/per)
+		need := comp.Count * groups
 		required += need
 		if perCategory[comp.CategoryID] != need {
 			return nil, ErrValidation{"Fiks içeriği eksik ya da fazla — her kategoriden doğru sayıda ürün seçin"}
