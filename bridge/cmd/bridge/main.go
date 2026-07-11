@@ -19,10 +19,11 @@ import (
 // kitchenPrintMsg is the wire format the backend publishes on
 // restaurant/{id}/kitchen/print. Keep in sync with backend.
 type kitchenPrintMsg struct {
-	OrderID string `json:"orderId"`
-	Header  string `json:"header"`
-	Footer  string `json:"footer,omitempty"`
-	Items   []struct {
+	OrderID     string `json:"orderId"`
+	TableNumber int    `json:"tableNumber"`
+	Header      string `json:"header"` // optional override; else built from table
+	Footer      string `json:"footer,omitempty"`
+	Items       []struct {
 		Qty  int    `json:"qty"`
 		Name string `json:"name"`
 		Note string `json:"note,omitempty"`
@@ -82,8 +83,12 @@ func main() {
 			slog.Error("bad print payload", "err", err)
 			return
 		}
+		header := msg.Header
+		if header == "" {
+			header = fmt.Sprintf("MUTFAK - MASA %d", msg.TableNumber)
+		}
 		ticket := printer.Ticket{
-			Header:    msg.Header,
+			Header:    header,
 			OrderID:   msg.OrderID,
 			Footer:    msg.Footer,
 			PrintedAt: time.Now(),
