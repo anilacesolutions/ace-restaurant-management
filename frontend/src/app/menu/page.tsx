@@ -4,13 +4,16 @@ import { formatTRY } from "@/lib/money";
 import { ADISYON_LOGO } from "@/lib/adisyonLogo";
 import type { CategoryWithItems, MenuResponse } from "@/lib/types";
 
-export const revalidate = 60; // seconds — menu changes rarely; keep it snappy
+// Render on demand (never bake a static page at build time — the backend may be
+// unreachable during the build, which would freeze a "yüklenemedi" fallback into
+// the CDN). The menu data itself is still cached 60s so we don't hammer the API.
+export const dynamic = "force-dynamic";
 
 async function getMenu(): Promise<CategoryWithItems[] | null> {
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
   try {
     const res = await fetch(`${base}/api/v1/public/menu`, {
-      next: { revalidate },
+      next: { revalidate: 60 },
     });
     if (!res.ok) return null;
     const data = (await res.json()) as MenuResponse;
