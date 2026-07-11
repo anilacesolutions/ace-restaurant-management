@@ -161,6 +161,8 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public auth endpoints (login, logout, me, qr exchange).
 		authH.MountPublic(r)
+		// Public read-only menu for the QR menu (qr.gunguzelbahce.online).
+		menuH.MountPublic(r)
 
 		// Either admin or waiter session can read these — shared data.
 		r.Group(func(r chi.Router) {

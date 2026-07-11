@@ -32,6 +32,12 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/menu", h.getMenu)
 }
 
+// MountPublic mounts the read-only menu for the public QR menu — no auth. Same
+// data as the authenticated /menu (active categories + available items).
+func (h *Handler) MountPublic(r chi.Router) {
+	r.Get("/public/menu", h.getMenu)
+}
+
 // MountAdmin mounts menu management — admin only.
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/menu/admin", h.listAll)
