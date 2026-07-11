@@ -394,6 +394,19 @@ func (s *Service) VoidItem(ctx context.Context, restaurantID, subjectID bson.Obj
 func buildFix(in AddItemInput, fixMI domain.MenuItem, menu map[string]domain.MenuItem, subjectID bson.ObjectID, now time.Time) ([]domain.OrderItem, error) {
 	people := in.Qty
 
+	// Composition is an UPPER LIMIT, not an exact requirement: the guests may
+	// take fewer items to avoid waste (e.g. 5 kişi × 2 = 10 meze max, but 8 is
+	// fine). maxByCat is the ceiling per category.
+	maxByCat := map[bson.ObjectID]int{}
+	for _, comp := range fixMI.FixIncludes {
+		per := comp.PerPeople
+		if per < 1 {
+			per = 1 // legacy / per-person
+		}
+		groups := (people + per - 1) / per // ceil(people/per)
+		maxByCat[comp.CategoryID] += comp.Count * groups
+	}
+
 	perCategory := map[bson.ObjectID]int{}
 	perItem := map[string]int{}
 	itemOrder := make([]string, 0, len(in.FixIncludedItemIDs))
@@ -402,6 +415,9 @@ func buildFix(in AddItemInput, fixMI domain.MenuItem, menu map[string]domain.Men
 		if !ok {
 			return nil, ErrValidation{"Fiks içeriği bulunamadı"}
 		}
+		if _, allowed := maxByCat[mi.CategoryID]; !allowed {
+			return nil, ErrValidation{"Fiks içeriğinde beklenmeyen ürün var"}
+		}
 		perCategory[mi.CategoryID]++
 		if perItem[incID] == 0 {
 			itemOrder = append(itemOrder, incID)
@@ -409,21 +425,13 @@ func buildFix(in AddItemInput, fixMI domain.MenuItem, menu map[string]domain.Men
 		perItem[incID]++
 	}
 
-	required := 0
-	for _, comp := range fixMI.FixIncludes {
-		per := comp.PerPeople
-		if per < 1 {
-			per = 1 // legacy / per-person
-		}
-		groups := (people + per - 1) / per // ceil(people/per)
-		need := comp.Count * groups
-		required += need
-		if perCategory[comp.CategoryID] != need {
-			return nil, ErrValidation{"Fiks içeriği eksik ya da fazla — her kategoriden doğru sayıda ürün seçin"}
-		}
+	if len(in.FixIncludedItemIDs) == 0 {
+		return nil, ErrValidation{"Fiks menü için içerik seçin"}
 	}
-	if len(in.FixIncludedItemIDs) != required {
-		return nil, ErrValidation{"Fiks içeriğinde beklenmeyen ürün var"}
+	for cat, n := range perCategory {
+		if n > maxByCat[cat] {
+			return nil, ErrValidation{"Fiks içeriği fazla — izin verilenden çok ürün seçildi"}
+		}
 	}
 
 	fixLineID := bson.NewObjectID()

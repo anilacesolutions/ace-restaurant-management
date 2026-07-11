@@ -1141,9 +1141,10 @@ function FixWizard({
   const catName = (id: string) => menu.find((c) => c.id === id)?.name ?? "?";
   const currentFor = (id: string) =>
     catItems(id).reduce((s, it) => s + (sel[it.id] ?? 0), 0);
-  // Items needed for this component: count for every `perPeople` people,
-  // rounded up (e.g. 1 salata / 4 kişi, 6 kişi -> 2).
-  const needFor = (c: FixComponent) =>
+  // Upper limit per component: count for every `perPeople` people, rounded up
+  // (e.g. 1 salata / 4 kişi, 6 kişi -> 2). The guests MAY take fewer to avoid
+  // waste; this is a max, not an exact requirement.
+  const maxFor = (c: FixComponent) =>
     c.count * Math.ceil(qty / Math.max(1, c.perPeople ?? 1));
 
   function bump(itemId: string, delta: number) {
@@ -1156,12 +1157,14 @@ function FixWizard({
     });
   }
 
-  const allMet = components.every(
-    (c) => currentFor(c.categoryId) === needFor(c),
+  const totalSel = Object.values(sel).reduce((s, n) => s + n, 0);
+  const withinLimits = components.every(
+    (c) => currentFor(c.categoryId) <= maxFor(c),
   );
+  const canConfirm = totalSel > 0 && withinLimits;
 
   function confirm() {
-    if (!allMet) return;
+    if (!canConfirm) return;
     const allItems = menu.flatMap((c) => c.items ?? []);
     const includes = Object.entries(sel)
       .map(([itemId, count]) => {
@@ -1216,29 +1219,24 @@ function FixWizard({
           </p>
         </div>
 
-        {/* Her kategori için seçim */}
+        {/* Her kategori için seçim — max limit, altında kalmak serbest */}
         {components.map((c) => {
-          const need = needFor(c);
+          const max = maxFor(c);
           const cur = currentFor(c.categoryId);
-          const done = cur === need;
           return (
             <div key={c.categoryId} className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-zinc-800">
                   {catName(c.categoryId)}
                 </span>
-                <span
-                  className={`text-sm font-bold tabular-nums ${
-                    done ? "text-green-700" : "text-amber-700"
-                  }`}
-                >
-                  {cur} / {need}
+                <span className="text-sm font-bold tabular-nums text-zinc-700">
+                  {cur} <span className="font-normal text-zinc-400">/ {max} en fazla</span>
                 </span>
               </div>
               <ul className="flex flex-col gap-2">
                 {catItems(c.categoryId).map((it) => {
                   const n = sel[it.id] ?? 0;
-                  const full = cur >= need;
+                  const full = cur >= max;
                   return (
                     <li
                       key={it.id}
@@ -1278,12 +1276,12 @@ function FixWizard({
       <div className="border-t border-zinc-200 p-4">
         <button
           onClick={confirm}
-          disabled={!allMet}
+          disabled={!canConfirm}
           className="w-full rounded-full bg-amber-700 py-3.5 text-base font-semibold text-white shadow-sm active:bg-amber-800 disabled:opacity-40"
         >
-          {allMet
+          {canConfirm
             ? `Sepete Ekle · ${formatTRY(fix.price * qty)}`
-            : "İçeriği tamamla"}
+            : "İçerik seç"}
         </button>
       </div>
     </div>
