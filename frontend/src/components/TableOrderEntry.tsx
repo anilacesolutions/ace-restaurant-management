@@ -30,6 +30,23 @@ interface FixEntry {
   includes: { item: MenuItem; qty: number }[];
 }
 
+// fold normalizes text for accent-insensitive search: lower-cases and maps
+// Turkish letters to their ASCII base (ş→s, ı/İ→i, ç→c, ğ→g, ö→o, ü→u) so
+// "sis" matches "Şiş" and "icecek" matches "İçecek".
+function fold(s: string): string {
+  return s
+    .toLocaleLowerCase("tr")
+    .replaceAll("ı", "i")
+    .replaceAll("ş", "s")
+    .replaceAll("ç", "c")
+    .replaceAll("ğ", "g")
+    .replaceAll("ö", "o")
+    .replaceAll("ü", "u")
+    .replaceAll("â", "a")
+    .replaceAll("î", "i")
+    .replaceAll("û", "u");
+}
+
 // TableOrderEntry is the table screen shared by the waiter (/garson/masa/[n])
 // and the cashier (/kasa/masa/[n]). It opens on the current adisyon (the orders
 // already placed); "Yeni Sipariş" switches to the full menu to add more.
@@ -699,6 +716,18 @@ function MenuView({
   onQty: (itemId: string, qty: number) => void;
   onRemoveFix: (key: string) => void;
 }) {
+  const [q, setQ] = useState("");
+  const query = fold(q.trim());
+  const filteredMenu = query
+    ? menu
+        .map((c) => ({
+          ...c,
+          items: (c.items ?? []).filter((it) => fold(it.name).includes(query)),
+        }))
+        .filter((c) => c.items.length > 0)
+    : menu;
+  const noResults = query !== "" && filteredMenu.length === 0;
+
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 pb-32">
       <header className="flex items-center justify-between">
@@ -735,20 +764,46 @@ function MenuView({
         </div>
       )}
 
-      <nav className="flex gap-2 overflow-x-auto pb-1">
-        {menu.map((c) => (
-          <a
-            key={c.id}
-            href={`#cat-${c.id}`}
-            className="shrink-0 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 shadow-sm active:bg-zinc-50"
+      <div className="relative">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Ürün ara (örn. ayran)"
+          className="w-full rounded-xl border border-zinc-300 bg-white py-3 pl-4 pr-10 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+        />
+        {q !== "" && (
+          <button
+            onClick={() => setQ("")}
+            className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-xl text-zinc-400 active:bg-zinc-100"
+            aria-label="Aramayı temizle"
           >
-            {c.name}
-          </a>
-        ))}
-      </nav>
+            ×
+          </button>
+        )}
+      </div>
+
+      {query === "" && (
+        <nav className="flex gap-2 overflow-x-auto pb-1">
+          {menu.map((c) => (
+            <a
+              key={c.id}
+              href={`#cat-${c.id}`}
+              className="shrink-0 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 shadow-sm active:bg-zinc-50"
+            >
+              {c.name}
+            </a>
+          ))}
+        </nav>
+      )}
+
+      {noResults && (
+        <p className="text-sm text-zinc-500">
+          &quot;{q.trim()}&quot; için ürün bulunamadı.
+        </p>
+      )}
 
       <div className="flex flex-col gap-8">
-        {menu.map((cat) => (
+        {filteredMenu.map((cat) => (
           <section
             key={cat.id}
             id={`cat-${cat.id}`}
