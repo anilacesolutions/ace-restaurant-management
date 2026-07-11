@@ -18,6 +18,7 @@ import (
 	"github.com/ace-solutions/restaurant-backend/internal/menu"
 	"github.com/ace-solutions/restaurant-backend/internal/mqttx"
 	"github.com/ace-solutions/restaurant-backend/internal/order"
+	"github.com/ace-solutions/restaurant-backend/internal/party"
 	"github.com/ace-solutions/restaurant-backend/internal/storage"
 	"github.com/ace-solutions/restaurant-backend/internal/tables"
 	"github.com/ace-solutions/restaurant-backend/internal/waiters"
@@ -122,7 +123,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	expenseSvc := expense.New(mongoX.DB, istanbul)
+	partySvc := party.New(mongoX.DB)
+	partyH, err := party.NewHandler(partySvc, cfg.DefaultRestaurantID)
+	if err != nil {
+		slog.Error("party handler init failed", "err", err)
+		os.Exit(1)
+	}
+
+	expenseSvc := expense.New(mongoX.DB, istanbul, partySvc)
 	expenseH, err := expense.NewHandler(expenseSvc, cfg.DefaultRestaurantID, istanbul)
 	if err != nil {
 		slog.Error("expense handler init failed", "err", err)
@@ -169,6 +177,7 @@ func main() {
 			orderH.MountAdmin(r)
 			tablesH.MountAdmin(r)
 			waitersH.MountAdmin(r)
+			partyH.MountAdmin(r)
 			expenseH.MountAdmin(r)
 			authH.MountAdmin(r)
 		})

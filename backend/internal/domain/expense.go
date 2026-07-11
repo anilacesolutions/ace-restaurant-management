@@ -21,11 +21,16 @@ type Expense struct {
 	Category     string        `bson:"category" json:"category"` // "Sebze-Meyve", "Kira", ...
 	Amount       Kurus         `bson:"amount" json:"amount"`     // full cost / debt, KDV-included
 	Supplier     string        `bson:"supplier,omitempty" json:"supplier,omitempty"`
-	Note         string        `bson:"note,omitempty" json:"note,omitempty"`
-	SpentAt      time.Time     `bson:"spentAt" json:"spentAt"` // the calendar day the cost was incurred
-	Payments     []Payment     `bson:"payments,omitempty" json:"payments"`
-	CreatedBy    bson.ObjectID `bson:"createdBy" json:"createdBy"`
-	CreatedAt    time.Time     `bson:"createdAt" json:"createdAt"`
+	// Party (cari) this expense is owed to, if any. PartyName is snapshotted so
+	// the row still reads right if the party is later deleted; PartyID groups the
+	// per-person summary.
+	PartyID   bson.ObjectID `bson:"partyId,omitempty" json:"partyId,omitempty"`
+	PartyName string        `bson:"partyName,omitempty" json:"partyName,omitempty"`
+	Note      string        `bson:"note,omitempty" json:"note,omitempty"`
+	SpentAt   time.Time     `bson:"spentAt" json:"spentAt"` // the calendar day the cost was incurred
+	Payments  []Payment     `bson:"payments,omitempty" json:"payments"`
+	CreatedBy bson.ObjectID `bson:"createdBy" json:"createdBy"`
+	CreatedAt time.Time     `bson:"createdAt" json:"createdAt"`
 }
 
 // Payment is one settlement against an Expense's debt.

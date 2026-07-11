@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatTRY, fromTL, toTL } from "@/lib/money";
-import type { Expense, Payment, ExpensesResponse } from "@/lib/types";
+import type {
+  Expense,
+  Party,
+  PartiesResponse,
+  Payment,
+  ExpensesResponse,
+} from "@/lib/types";
 
 const CATEGORIES = [
   "Sebze-Meyve",
@@ -231,7 +237,12 @@ export default function ErpGiderlerPage() {
                   <span className="truncate text-base font-semibold text-zinc-900">
                     {e.category}
                   </span>
-                  <span className="mt-0.5">
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                    {e.partyName && (
+                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
+                        {e.partyName}
+                      </span>
+                    )}
                     <StatusBadge expense={e} />
                   </span>
                 </div>
@@ -427,6 +438,7 @@ function ExpenseDetailSheet({
           </div>
           <p className="mt-2 text-xs text-zinc-400">
             {fmtDay(expense.spentAt)}
+            {expense.partyName ? ` · ${expense.partyName}` : ""}
             {expense.supplier ? ` · ${expense.supplier}` : ""}
             {expense.note ? ` · ${expense.note}` : ""}
           </p>
@@ -555,8 +567,17 @@ function ExpenseFormSheet({
   const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
   const [spentAt, setSpentAt] = useState(todayISO);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [party, setParty] = useState<Party | null>(null);
+  const [pickingParty, setPickingParty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<PartiesResponse>("/api/v1/parties")
+      .then((r) => setParties(r.parties))
+      .catch(() => setParties([]));
+  }, []);
 
   async function save() {
     setError(null);
@@ -577,6 +598,7 @@ function ExpenseFormSheet({
           category,
           amount: fromTL(tl),
           supplier,
+          partyId: party?.id ?? "",
           note,
           spentAt,
         }),
@@ -652,6 +674,29 @@ function ExpenseFormSheet({
           />
         </Field>
 
+        <Field label="Kişi / Cari (opsiyonel)">
+          {party ? (
+            <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+              <span className="flex-1 truncate text-base font-medium text-sky-900">
+                {party.name}
+              </span>
+              <button
+                onClick={() => setParty(null)}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-sky-800 active:bg-sky-100"
+              >
+                Kaldır
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setPickingParty(true)}
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-left text-base text-zinc-500 shadow-sm active:bg-zinc-50"
+            >
+              Kişi seç (borç, avans...)
+            </button>
+          )}
+        </Field>
+
         <Field label="Tedarikci / yer (opsiyonel)">
           <input
             value={supplier}
@@ -669,6 +714,89 @@ function ExpenseFormSheet({
             className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
           />
         </Field>
+      </div>
+
+      {pickingParty && (
+        <PartyPicker
+          parties={parties}
+          onPick={(p) => {
+            setParty(p);
+            setPickingParty(false);
+          }}
+          onClose={() => setPickingParty(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---- Party picker (full-screen sheet, no dropdown) -----------------------
+
+function PartyPicker({
+  parties,
+  onPick,
+  onClose,
+}: {
+  parties: Party[];
+  onPick: (p: Party) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const norm = (s: string) => s.toLocaleLowerCase("tr");
+  const filtered = q.trim()
+    ? parties.filter((p) => norm(p.name).includes(norm(q.trim())))
+    : parties;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-white">
+      <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <button
+          onClick={onClose}
+          className="rounded-full px-3 py-2 text-sm font-medium text-zinc-600 active:bg-zinc-100"
+        >
+          Kapat
+        </button>
+        <h2 className="text-base font-semibold text-zinc-900">Kişi Seç</h2>
+        <span className="w-16" />
+      </header>
+
+      <div className="p-4">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Kişi ara"
+          className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-8">
+        {parties.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            Henüz kişi yok. Kişiler / Cari ekranından ekleyebilirsin.
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-zinc-500">Eşleşen kişi yok.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {filtered.map((p) => (
+              <li key={p.id}>
+                <button
+                  onClick={() => onPick(p)}
+                  className="flex w-full items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-sm active:bg-zinc-50"
+                >
+                  <span className="truncate text-base font-medium text-zinc-900">
+                    {p.name}
+                  </span>
+                  {p.remaining > 0 && (
+                    <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-800">
+                      kalan {formatTRY(p.remaining)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

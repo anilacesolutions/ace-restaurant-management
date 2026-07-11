@@ -140,6 +140,8 @@ export interface Expense {
   category: string;
   amount: Kurus;
   supplier?: string;
+  partyId?: string;
+  partyName?: string;
   note?: string;
   spentAt: string; // RFC3339
   payments: Payment[] | null;
@@ -149,6 +151,24 @@ export interface Expense {
 
 export interface ExpensesResponse {
   expenses: Expense[];
+}
+
+export interface Party {
+  id: string;
+  restaurantId: string;
+  name: string;
+  note?: string;
+  active: boolean;
+  createdAt: string;
+  // summary (kuruş) — debt across all their expenses, paid, and remaining
+  debt: Kurus;
+  paid: Kurus;
+  remaining: Kurus;
+  expenseCount: number;
+}
+
+export interface PartiesResponse {
+  parties: Party[];
 }
 
 export interface User {

@@ -25,22 +25,31 @@ func (e ErrValidation) Error() string { return e.Msg }
 
 const dateLayout = "2006-01-02"
 
-type Service struct {
-	db  *mongo.Database
-	loc *time.Location // Istanbul — SpentAt is a calendar day in local time
+// PartyResolver fetches a party so its display name can be snapshotted onto an
+// expense (the party package satisfies this).
+type PartyResolver interface {
+	Get(ctx context.Context, restaurantID, id bson.ObjectID) (domain.Party, error)
 }
 
-func New(db *mongo.Database, loc *time.Location) *Service {
-	return &Service{db: db, loc: loc}
+type Service struct {
+	db      *mongo.Database
+	loc     *time.Location // Istanbul — SpentAt is a calendar day in local time
+	parties PartyResolver
+}
+
+func New(db *mongo.Database, loc *time.Location, parties PartyResolver) *Service {
+	return &Service{db: db, loc: loc, parties: parties}
 }
 
 func (s *Service) coll() *mongo.Collection { return s.db.Collection("expenses") }
 
-// Input is the create payload. SpentAt is a "YYYY-MM-DD" calendar day.
+// Input is the create payload. SpentAt is a "YYYY-MM-DD" calendar day. PartyID
+// (optional) attaches the expense to a cari/kişi.
 type Input struct {
 	Category string       `json:"category"`
 	Amount   domain.Kurus `json:"amount"`
 	Supplier string       `json:"supplier"`
+	PartyID  string       `json:"partyId"`
 	Note     string       `json:"note"`
 	SpentAt  string       `json:"spentAt"`
 }
@@ -59,12 +68,30 @@ func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.Objec
 		return nil, ErrValidation{"Geçerli bir tarih girilmeli"}
 	}
 
+	// Resolve the party (if chosen) and snapshot its name onto the expense.
+	var partyID bson.ObjectID
+	var partyName string
+	if raw := strings.TrimSpace(in.PartyID); raw != "" {
+		pid, err := bson.ObjectIDFromHex(raw)
+		if err != nil {
+			return nil, ErrValidation{"Geçersiz kişi"}
+		}
+		p, err := s.parties.Get(ctx, restaurantID, pid)
+		if err != nil {
+			return nil, ErrValidation{"Kişi bulunamadı"}
+		}
+		partyID = p.ID
+		partyName = p.Name
+	}
+
 	exp := domain.Expense{
 		ID:           bson.NewObjectID(),
 		RestaurantID: restaurantID,
 		Category:     category,
 		Amount:       in.Amount,
 		Supplier:     strings.TrimSpace(in.Supplier),
+		PartyID:      partyID,
+		PartyName:    partyName,
 		Note:         strings.TrimSpace(in.Note),
 		SpentAt:      spentAt,
 		CreatedBy:    createdBy,
