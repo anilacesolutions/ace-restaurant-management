@@ -137,23 +137,23 @@ export default async function PublicMenuPage() {
         </>
       )}
 
-      <footer className="mt-auto">
-        <div className="px-4 py-8 text-center">
+      <footer className="mt-auto flex flex-col items-center gap-6 px-4 py-8 text-center">
+        <div>
           <p className="text-sm font-medium text-amber-900">Afiyet olsun</p>
           <p className="mt-1 text-xs text-zinc-400">Gün Güzelbahçe</p>
         </div>
-        {/* Builder credit — dark strip so the white ACE logo stays visible */}
+        {/* Builder credit */}
         <a
           href="https://ace-solutions.io"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex flex-col items-center gap-2 bg-zinc-900 px-4 py-6 active:bg-zinc-800"
+          className="flex flex-col items-center gap-2"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/ace-solutions.svg"
             alt="ACE Solutions"
-            className="h-7 w-auto"
+            className="h-6 w-auto"
           />
           <span className="text-xs text-zinc-400">
             Made with <span className="text-red-500">♥</span> by ACE Solutions
