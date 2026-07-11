@@ -85,42 +85,47 @@ export default function KasaPage() {
           Henuz masa tanimli degil. ERP → Masalar bolumunden ekleyin.
         </p>
       ) : (
-        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
+        <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
           {tables.map((t) => {
             const order = orderByTable.get(t.number);
             const open = !!order;
-            const itemCount = order
-              ? order.items
-                  .filter((it) => it.status !== "voided" && it.status !== "refunded")
-                  .reduce((s, it) => s + it.qty, 0)
-              : 0;
+            const live = order
+              ? order.items.filter(
+                  (it) => it.status !== "voided" && it.status !== "refunded",
+                )
+              : [];
+            // People on a fiks menü = sum of qty across the priced fix lines.
+            const fixPeople = live
+              .filter((it) => it.isFix)
+              .reduce((s, it) => s + it.qty, 0);
+            const itemCount = live.reduce((s, it) => s + it.qty, 0);
             return (
               <li key={t.id}>
                 <Link
                   href={`/kasa/masa/${t.number}`}
-                  className={`flex aspect-square flex-col items-center justify-center rounded-2xl border text-center shadow-sm active:opacity-90 ${
+                  className={`flex aspect-square flex-col items-center justify-center rounded-xl border px-1 text-center shadow-sm active:opacity-90 ${
                     open
                       ? "border-amber-300 bg-amber-50"
                       : "border-zinc-200 bg-white active:bg-zinc-50"
                   }`}
                 >
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+                  <span className="text-[9px] uppercase tracking-wide text-zinc-500">
                     Masa
                   </span>
-                  <span className="text-3xl font-semibold tabular-nums text-zinc-900">
+                  <span className="text-2xl font-semibold leading-none tabular-nums text-zinc-900">
                     {t.number}
                   </span>
                   {open ? (
                     <>
-                      <span className="mt-1 text-base font-bold tabular-nums text-amber-800">
+                      <span className="mt-1 text-sm font-bold tabular-nums text-amber-800">
                         {formatTRY(order!.grandTotal)}
                       </span>
-                      <span className="text-[10px] text-amber-700">
-                        {itemCount} ürün
+                      <span className="text-[10px] font-medium text-amber-700">
+                        {fixPeople > 0 ? `${fixPeople} kişi fiks` : `${itemCount} ürün`}
                       </span>
                     </>
                   ) : (
-                    <span className="mt-1 text-[10px] uppercase tracking-wide text-zinc-400">
+                    <span className="mt-1 text-[9px] uppercase tracking-wide text-zinc-400">
                       Boş
                     </span>
                   )}
