@@ -171,6 +171,22 @@ export interface PartiesResponse {
   parties: Party[];
 }
 
+export interface ItemStat {
+  name: string;
+  qty: number;
+  revenue: Kurus;
+}
+
+export interface SalesReport {
+  revenue: Kurus; // gross (KDV-included)
+  net: Kurus; // matrah
+  otv: Kurus;
+  orderCount: number;
+  payment: Record<string, Kurus>; // "nakit","kart",... -> gross
+  kdv: Record<string, Kurus>; // "10","20" -> tax portion
+  topItems: ItemStat[];
+}
+
 export interface User {
   id: string;
   restaurantId: string;

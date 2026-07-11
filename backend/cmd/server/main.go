@@ -19,6 +19,7 @@ import (
 	"github.com/ace-solutions/restaurant-backend/internal/mqttx"
 	"github.com/ace-solutions/restaurant-backend/internal/order"
 	"github.com/ace-solutions/restaurant-backend/internal/party"
+	"github.com/ace-solutions/restaurant-backend/internal/report"
 	"github.com/ace-solutions/restaurant-backend/internal/storage"
 	"github.com/ace-solutions/restaurant-backend/internal/tables"
 	"github.com/ace-solutions/restaurant-backend/internal/waiters"
@@ -137,6 +138,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	reportSvc := report.New(mongoX.DB)
+	reportH, err := report.NewHandler(reportSvc, cfg.DefaultRestaurantID, istanbul)
+	if err != nil {
+		slog.Error("report handler init failed", "err", err)
+		os.Exit(1)
+	}
+
 	orderSvc := order.New(mongoX.DB, mqttClient)
 	orderH, err := order.NewHandler(orderSvc, cfg.DefaultRestaurantID)
 	if err != nil {
@@ -181,6 +189,7 @@ func main() {
 			waitersH.MountAdmin(r)
 			partyH.MountAdmin(r)
 			expenseH.MountAdmin(r)
+			reportH.MountAdmin(r)
 			authH.MountAdmin(r)
 		})
 	})
