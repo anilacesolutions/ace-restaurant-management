@@ -61,8 +61,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	prn := printer.New(printer.Mode(cfg.PrinterMode), cfg.PrinterAddr, cfg.PrinterCols)
-	prn.SetLogo(cfg.PrinterLogo)
+	// Two printers, split by role. Kitchen ticket has no logo; adisyon does.
+	kitchenPrn := printer.New(printer.Mode(cfg.PrinterMode), cfg.KitchenAddr, cfg.KitchenCols)
+	kitchenPrn.SetLogo(false)
+	adisyonPrn := printer.New(printer.Mode(cfg.PrinterMode), cfg.AdisyonAddr, cfg.AdisyonCols)
+	adisyonPrn.SetLogo(cfg.PrinterLogo)
 
 	mq, err := mqttx.Connect(mqttx.Config{
 		Broker:   cfg.MQTTBroker,
@@ -100,7 +103,7 @@ func main() {
 				Note: it.Note,
 			})
 		}
-		if err := prn.Print(ticket); err != nil {
+		if err := kitchenPrn.Print(ticket); err != nil {
 			slog.Error("print failed", "orderId", msg.OrderID, "err", err)
 			return
 		}
@@ -134,7 +137,7 @@ func main() {
 				Note:      it.Note,
 			})
 		}
-		if err := prn.PrintReceipt(receipt); err != nil {
+		if err := adisyonPrn.PrintReceipt(receipt); err != nil {
 			slog.Error("adisyon print failed", "table", msg.TableNumber, "err", err)
 			return
 		}
@@ -145,8 +148,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("bridge ready", "restaurant", cfg.RestaurantID,
-		"kitchen", topic, "adisyon", adisyonTopic, "printer", cfg.PrinterMode)
+	slog.Info("bridge ready", "restaurant", cfg.RestaurantID, "mode", cfg.PrinterMode,
+		"kitchenPrinter", cfg.KitchenAddr, "kitchenCols", cfg.KitchenCols,
+		"adisyonPrinter", cfg.AdisyonAddr, "adisyonCols", cfg.AdisyonCols)
 
 	<-ctx.Done()
 	slog.Info("shutting down")

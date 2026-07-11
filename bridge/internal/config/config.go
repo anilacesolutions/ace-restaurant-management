@@ -13,13 +13,23 @@ type Config struct {
 	MQTTUsername   string
 	MQTTPassword   string
 
-	PrinterMode string // "windows", "usb", "network", "stdout" (dev)
-	PrinterAddr string // windows: printer name; network: host:port; usb: device path
-	PrinterCols int    // characters per line (58mm=32, 80mm=48)
+	PrinterMode string // "windows", "usb", "network", "stdout" (dev) — shared
 	PrinterLogo bool   // print the logo bitmap atop the adisyon (default true)
+
+	// Two printers, split by role: the kitchen ticket (Mutfağa Gönder) and the
+	// customer adisyon (Adisyon Bas) can go to different physical printers with
+	// different paper widths. Each falls back to the shared PRINTER_ADDR/
+	// PRINTER_COLS when its own vars are unset (single-printer setups still work).
+	KitchenAddr string // kitchen printer (e.g. old 58mm)
+	KitchenCols int    // 58mm=32
+	AdisyonAddr string // adisyon printer (e.g. new 80mm)
+	AdisyonCols int    // 80mm=48
 }
 
 func Load() (*Config, error) {
+	sharedAddr := os.Getenv("PRINTER_ADDR")
+	sharedCols := getEnvInt("PRINTER_COLS", 32)
+
 	cfg := &Config{
 		RestaurantID:   os.Getenv("RESTAURANT_ID"),
 		RestaurantName: getEnv("RESTAURANT_NAME", "GUN GUZELBAHCE"),
@@ -28,9 +38,11 @@ func Load() (*Config, error) {
 		MQTTUsername:   os.Getenv("MQTT_USERNAME"),
 		MQTTPassword:   os.Getenv("MQTT_PASSWORD"),
 		PrinterMode:    getEnv("PRINTER_MODE", "stdout"),
-		PrinterAddr:    os.Getenv("PRINTER_ADDR"),
-		PrinterCols:    getEnvInt("PRINTER_COLS", 32),
 		PrinterLogo:    getEnv("PRINTER_LOGO", "true") != "false",
+		KitchenAddr:    getEnv("KITCHEN_PRINTER_ADDR", sharedAddr),
+		KitchenCols:    getEnvInt("KITCHEN_PRINTER_COLS", sharedCols),
+		AdisyonAddr:    getEnv("ADISYON_PRINTER_ADDR", sharedAddr),
+		AdisyonCols:    getEnvInt("ADISYON_PRINTER_COLS", 48),
 	}
 	if cfg.RestaurantID == "" {
 		return nil, fmt.Errorf("RESTAURANT_ID is required")
