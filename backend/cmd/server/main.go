@@ -19,6 +19,7 @@ import (
 	"github.com/ace-solutions/restaurant-backend/internal/mqttx"
 	"github.com/ace-solutions/restaurant-backend/internal/order"
 	"github.com/ace-solutions/restaurant-backend/internal/party"
+	"github.com/ace-solutions/restaurant-backend/internal/receivable"
 	"github.com/ace-solutions/restaurant-backend/internal/report"
 	"github.com/ace-solutions/restaurant-backend/internal/storage"
 	"github.com/ace-solutions/restaurant-backend/internal/tables"
@@ -138,6 +139,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	receivableSvc := receivable.New(mongoX.DB, istanbul)
+	receivableH, err := receivable.NewHandler(receivableSvc, cfg.DefaultRestaurantID, istanbul)
+	if err != nil {
+		slog.Error("receivable handler init failed", "err", err)
+		os.Exit(1)
+	}
+
 	reportSvc := report.New(mongoX.DB)
 	reportH, err := report.NewHandler(reportSvc, cfg.DefaultRestaurantID, istanbul)
 	if err != nil {
@@ -189,6 +197,7 @@ func main() {
 			waitersH.MountAdmin(r)
 			partyH.MountAdmin(r)
 			expenseH.MountAdmin(r)
+			receivableH.MountAdmin(r)
 			reportH.MountAdmin(r)
 			authH.MountAdmin(r)
 		})

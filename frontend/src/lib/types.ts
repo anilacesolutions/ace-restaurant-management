@@ -171,6 +171,22 @@ export interface PartiesResponse {
   parties: Party[];
 }
 
+export interface Receivable {
+  id: string;
+  restaurantId: string;
+  personName: string;
+  amount: Kurus;
+  note?: string;
+  issuedAt: string; // RFC3339
+  payments: Payment[] | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ReceivablesResponse {
+  receivables: Receivable[];
+}
+
 export interface ItemStat {
   name: string;
   qty: number;
