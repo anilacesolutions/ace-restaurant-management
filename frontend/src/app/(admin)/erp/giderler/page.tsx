@@ -12,19 +12,6 @@ import type {
   ExpensesResponse,
 } from "@/lib/types";
 
-const CATEGORIES = [
-  "Sebze-Meyve",
-  "Et/Tavuk/Balık",
-  "İçecek",
-  "Bakliyat/Kuru Gıda",
-  "Süt Ürünleri",
-  "Temizlik",
-  "Kira",
-  "Personel",
-  "Fatura",
-  "Diğer",
-] as const;
-
 const TZ = "Europe/Istanbul";
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -100,10 +87,13 @@ export default function ErpGiderlerPage() {
     return { total, paid, remaining: total - paid };
   }, [expenses]);
 
-  const byCategory = useMemo(() => {
+  // Spending grouped by cari/kalem (falls back to the old category for rows
+  // entered before the merge).
+  const byParty = useMemo(() => {
     const m = new Map<string, number>();
     for (const e of expenses ?? []) {
-      m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
+      const key = e.partyName || e.category || "Diğer";
+      m.set(key, (m.get(key) ?? 0) + e.amount);
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [expenses]);
@@ -116,7 +106,11 @@ export default function ErpGiderlerPage() {
   }
 
   async function deleteExpense(e: Expense) {
-    if (!confirm(`${e.category} — ${formatTRY(e.amount)} gideri silinsin mi?`))
+    if (
+      !confirm(
+        `${e.partyName || e.category || "Gider"} — ${formatTRY(e.amount)} gideri silinsin mi?`,
+      )
+    )
       return;
     setBusy(true);
     try {
@@ -189,14 +183,14 @@ export default function ErpGiderlerPage() {
             tone={totals.remaining > 0 ? "red" : "green"}
           />
         </div>
-        {byCategory.length > 0 && (
+        {byParty.length > 0 && (
           <ul className="mt-4 flex flex-col gap-1.5 border-t border-amber-200 pt-3">
-            {byCategory.map(([cat, amt]) => (
+            {byParty.map(([name, amt]) => (
               <li
-                key={cat}
+                key={name}
                 className="flex items-center justify-between text-sm text-amber-900/80"
               >
-                <span>{cat}</span>
+                <span>{name}</span>
                 <span className="tabular-nums">{formatTRY(amt)}</span>
               </li>
             ))}
@@ -235,12 +229,14 @@ export default function ErpGiderlerPage() {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-base font-semibold text-zinc-900">
-                    {e.category}
+                    {e.partyName || e.category || "Gider"}
                   </span>
                   <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                    {e.partyName && (
-                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
-                        {e.partyName}
+                    {/* old rows: category shown as a tag when a cari name is
+                        also the title (usually only one of them exists) */}
+                    {e.partyName && e.category && (
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
+                        {e.category}
                       </span>
                     )}
                     <StatusBadge expense={e} />
@@ -562,9 +558,7 @@ function ExpenseFormSheet({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  const [category, setCategory] = useState("");
   const [amountTL, setAmountTL] = useState("");
-  const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
   const [spentAt, setSpentAt] = useState(todayISO);
   const [parties, setParties] = useState<Party[]>([]);
@@ -579,14 +573,17 @@ function ExpenseFormSheet({
       .catch(() => setParties([]));
   }, []);
 
+  const tl = Number(amountTL.replace(",", "."));
+  const amountOk = Number.isFinite(tl) && tl > 0;
+  const canSave = !!spentAt && !!party && amountOk;
+
   async function save() {
     setError(null);
-    if (!category.trim()) {
-      setError("Kategori sec");
+    if (!party) {
+      setError("Cari / kalem seç");
       return;
     }
-    const tl = Number(amountTL.replace(",", "."));
-    if (!Number.isFinite(tl) || tl <= 0) {
+    if (!amountOk) {
       setError("Gecerli bir tutar gir");
       return;
     }
@@ -595,10 +592,8 @@ function ExpenseFormSheet({
       await api("/api/v1/expenses", {
         method: "POST",
         body: JSON.stringify({
-          category,
           amount: fromTL(tl),
-          supplier,
-          partyId: party?.id ?? "",
+          partyId: party.id,
           note,
           spentAt,
         }),
@@ -623,13 +618,14 @@ function ExpenseFormSheet({
         <h2 className="text-base font-semibold text-zinc-900">Yeni Gider</h2>
         <button
           onClick={save}
-          disabled={busy}
-          className="rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white active:bg-amber-800 disabled:opacity-50"
+          disabled={busy || !canSave}
+          className="rounded-full bg-amber-700 px-4 py-2 text-sm font-semibold text-white active:bg-amber-800 disabled:opacity-40"
         >
           {busy ? "..." : "Kaydet"}
         </button>
       </header>
 
+      {/* Step-by-step: each answered step reveals the next below it. */}
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-4 pb-28">
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -637,7 +633,8 @@ function ExpenseFormSheet({
           </div>
         )}
 
-        <Field label="Tarih">
+        {/* 1 — Tarih */}
+        <Field label="1. Tarih">
           <input
             type="date"
             value={spentAt}
@@ -646,74 +643,57 @@ function ExpenseFormSheet({
           />
         </Field>
 
-        <Field label="Kategori">
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((c) => (
+        {/* 2 — Cari / Kalem (zorunlu) */}
+        {spentAt && (
+          <Field label="2. Cari / Kalem">
+            {party ? (
+              <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                <span className="flex-1 truncate text-base font-medium text-sky-900">
+                  {party.name}
+                </span>
+                <button
+                  onClick={() => setPickingParty(true)}
+                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-sky-800 active:bg-sky-100"
+                >
+                  Değiştir
+                </button>
+              </div>
+            ) : (
               <button
-                key={c}
-                onClick={() => setCategory(c)}
-                className={`rounded-full px-3.5 py-2 text-sm font-medium active:bg-amber-100 ${
-                  category === c
-                    ? "bg-amber-700 text-white"
-                    : "bg-zinc-100 text-zinc-700"
-                }`}
+                onClick={() => setPickingParty(true)}
+                className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-left text-base text-zinc-500 shadow-sm active:bg-zinc-50"
               >
-                {c}
+                Kime / ne için? (Ahmet Bey, Kira, Maaş, Fatura...)
               </button>
-            ))}
-          </div>
-        </Field>
+            )}
+          </Field>
+        )}
 
-        <Field label="Tutar (TL)">
-          <input
-            value={amountTL}
-            onChange={(e) => setAmountTL(e.target.value)}
-            inputMode="decimal"
-            placeholder="orn. 10000"
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base tabular-nums text-zinc-900 shadow-sm outline-none focus:border-amber-500"
-          />
-        </Field>
+        {/* 3 — Tutar (kişi seçilince açılır) */}
+        {party && (
+          <Field label="3. Tutar (TL)">
+            <input
+              value={amountTL}
+              onChange={(e) => setAmountTL(e.target.value)}
+              inputMode="decimal"
+              placeholder="orn. 10000"
+              autoFocus
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base tabular-nums text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+            />
+          </Field>
+        )}
 
-        <Field label="Kişi / Cari (opsiyonel)">
-          {party ? (
-            <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
-              <span className="flex-1 truncate text-base font-medium text-sky-900">
-                {party.name}
-              </span>
-              <button
-                onClick={() => setParty(null)}
-                className="rounded-lg px-3 py-1.5 text-sm font-medium text-sky-800 active:bg-sky-100"
-              >
-                Kaldır
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setPickingParty(true)}
-              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-left text-base text-zinc-500 shadow-sm active:bg-zinc-50"
-            >
-              Kişi seç (borç, avans...)
-            </button>
-          )}
-        </Field>
-
-        <Field label="Tedarikci / yer (opsiyonel)">
-          <input
-            value={supplier}
-            onChange={(e) => setSupplier(e.target.value)}
-            placeholder="orn. Hal Manavi"
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
-          />
-        </Field>
-
-        <Field label="Not (opsiyonel)">
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="orn. haftalik sebze meyve"
-            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
-          />
-        </Field>
+        {/* 4 — Not (tutar girilince açılır, opsiyonel) */}
+        {party && amountTL.trim() !== "" && (
+          <Field label="4. Not (opsiyonel)">
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="orn. haftalik sebze meyve"
+              className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+            />
+          </Field>
+        )}
       </div>
 
       {pickingParty && (

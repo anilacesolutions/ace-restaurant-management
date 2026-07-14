@@ -30,7 +30,7 @@ export default function ErpKisilerPage() {
   async function remove(p: Party) {
     if (
       !confirm(
-        `${p.name} kişisi silinsin mi? (geçmiş giderler etkilenmez, isim korunur)`,
+        `${p.name} silinsin mi? (geçmiş giderler etkilenmez, isim korunur)`,
       )
     )
       return;
@@ -54,14 +54,14 @@ export default function ErpKisilerPage() {
             ←
           </Link>
           <h1 className="text-2xl font-semibold text-zinc-900">
-            Kişiler / Cari
+            Cari / Kalemler
           </h1>
         </div>
         <button
           onClick={() => setAdding(true)}
           className="rounded-full bg-amber-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm active:bg-amber-800"
         >
-          + Yeni Kişi
+          + Yeni Kalem
         </button>
       </header>
 
@@ -89,7 +89,7 @@ export default function ErpKisilerPage() {
         <p className="text-sm text-zinc-500">Yukleniyor...</p>
       ) : parties.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          Henüz kişi yok. + Yeni Kişi ile ekleyin (Ahmet Bey, garson avansı...).
+          Henüz kalem yok. + Yeni Kalem ile ekleyin (Ahmet Bey, Kira, Maaş, Fatura, Avans...).
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -187,7 +187,7 @@ function PartyFormSheet({
         >
           Iptal
         </button>
-        <h2 className="text-base font-semibold text-zinc-900">Yeni Kişi</h2>
+        <h2 className="text-base font-semibold text-zinc-900">Yeni Kalem</h2>
         <button
           onClick={save}
           disabled={busy}
@@ -211,7 +211,7 @@ function PartyFormSheet({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="orn. Ahmet Bey, Garson Mehmet"
+            placeholder="orn. Ahmet Bey, Kira, Maaş, Fatura, Avans"
             className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
           />
         </div>

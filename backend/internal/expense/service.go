@@ -56,10 +56,9 @@ type Input struct {
 
 // Create validates the input and inserts one expense row.
 func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.ObjectID, in Input, now time.Time) (*domain.Expense, error) {
+	// Category (Sebze-Meyve, Kira...) was merged into the Cari/Kalemler list —
+	// it's now optional (old rows keep theirs), the party/kalem is mandatory.
 	category := strings.TrimSpace(in.Category)
-	if category == "" {
-		return nil, ErrValidation{"Kategori zorunlu"}
-	}
 	if in.Amount <= 0 {
 		return nil, ErrValidation{"Tutar 0'dan büyük olmalı"}
 	}
@@ -68,21 +67,21 @@ func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.Objec
 		return nil, ErrValidation{"Geçerli bir tarih girilmeli"}
 	}
 
-	// Resolve the party (if chosen) and snapshot its name onto the expense.
-	var partyID bson.ObjectID
-	var partyName string
-	if raw := strings.TrimSpace(in.PartyID); raw != "" {
-		pid, err := bson.ObjectIDFromHex(raw)
-		if err != nil {
-			return nil, ErrValidation{"Geçersiz kişi"}
-		}
-		p, err := s.parties.Get(ctx, restaurantID, pid)
-		if err != nil {
-			return nil, ErrValidation{"Kişi bulunamadı"}
-		}
-		partyID = p.ID
-		partyName = p.Name
+	// Cari / kalem is required — resolve it and snapshot its name onto the row.
+	raw := strings.TrimSpace(in.PartyID)
+	if raw == "" {
+		return nil, ErrValidation{"Cari / kalem seçilmeli"}
 	}
+	pid, err := bson.ObjectIDFromHex(raw)
+	if err != nil {
+		return nil, ErrValidation{"Geçersiz cari / kalem"}
+	}
+	p, err := s.parties.Get(ctx, restaurantID, pid)
+	if err != nil {
+		return nil, ErrValidation{"Cari / kalem bulunamadı"}
+	}
+	partyID := p.ID
+	partyName := p.Name
 
 	exp := domain.Expense{
 		ID:           bson.NewObjectID(),

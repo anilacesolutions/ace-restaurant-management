@@ -5,7 +5,7 @@ const sections = [
   { href: "/erp/garsonlar", title: "Garsonlar", desc: "Garson ekle, duzenle, sil" },
   { href: "/erp/menu", title: "Menu", desc: "Kategori ve urunler" },
   { href: "/erp/giderler", title: "Giderler", desc: "Gider defteri, alimlar" },
-  { href: "/erp/kisiler", title: "Kişiler / Cari", desc: "Borçlu olunan kişiler, avanslar" },
+  { href: "/erp/kisiler", title: "Cari / Kalemler", desc: "Kişiler, kira, maaş, fatura, avans" },
   { href: "/erp/raporlar", title: "Raporlar", desc: "Gunluk, haftalik satis" },
 ] as const;
 
