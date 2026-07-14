@@ -146,7 +146,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	reportSvc := report.New(mongoX.DB)
+	reportSvc := report.New(mongoX.DB, mqttClient)
 	reportH, err := report.NewHandler(reportSvc, cfg.DefaultRestaurantID, istanbul)
 	if err != nil {
 		slog.Error("report handler init failed", "err", err)

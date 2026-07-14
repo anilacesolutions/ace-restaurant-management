@@ -41,6 +41,11 @@ func CashierPrint(restaurantID string) string {
 	return fmt.Sprintf("restaurant/%s/cashier/print", restaurantID)
 }
 
+// ReportPrint carries the end-of-day report to the register bridge (58mm).
+func ReportPrint(restaurantID string) string {
+	return fmt.Sprintf("restaurant/%s/report/print", restaurantID)
+}
+
 func POSCharge(restaurantID string) string {
 	return fmt.Sprintf("restaurant/%s/pos/charge", restaurantID)
 }

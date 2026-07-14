@@ -58,6 +58,8 @@ export default function ErpRaporlarPage() {
   const [report, setReport] = useState<SalesReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
+  const [printNotice, setPrintNotice] = useState<string | null>(null);
 
   const range = useMemo(() => {
     const today = todayISO();
@@ -111,18 +113,60 @@ export default function ErpRaporlarPage() {
     .filter(([, v]) => v > 0)
     .sort((a, b) => Number(a[0]) - Number(b[0]));
 
+  const rangeLabel =
+    tab === "today"
+      ? "BUGUN"
+      : tab === "week"
+        ? "BU HAFTA"
+        : tab === "month"
+          ? "BU AY"
+          : `${customFrom} - ${customTo}`;
+
+  async function printReport() {
+    setPrintNotice(null);
+    setError(null);
+    setPrinting(true);
+    try {
+      await api(
+        `/api/v1/reports/print?from=${range.from}&to=${range.to}&label=${encodeURIComponent(rangeLabel)}`,
+        { method: "POST" },
+      );
+      setPrintNotice("Rapor yazıcıya gönderildi");
+      window.setTimeout(() => setPrintNotice(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 pb-24">
-      <header className="flex items-center gap-3">
-        <Link
-          href="/erp"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 shadow-sm active:bg-zinc-50"
-          aria-label="Geri"
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/erp"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 shadow-sm active:bg-zinc-50"
+            aria-label="Geri"
+          >
+            ←
+          </Link>
+          <h1 className="text-2xl font-semibold text-zinc-900">Raporlar</h1>
+        </div>
+        <button
+          onClick={printReport}
+          disabled={printing || report === null}
+          className="rounded-full bg-amber-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm active:bg-amber-800 disabled:opacity-40"
         >
-          ←
-        </Link>
-        <h1 className="text-2xl font-semibold text-zinc-900">Raporlar</h1>
+          {printing ? "..." : "🧾 Rapor Bas"}
+        </button>
       </header>
+
+      {printNotice && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
+          {printNotice}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -196,6 +240,51 @@ export default function ErpRaporlarPage() {
               </div>
             </div>
           </div>
+
+          {/* Finansal özet — satış olmasa da anlamlı (gider/açık bağımsız) */}
+          <Section title="Finansal Özet">
+            <div className="grid grid-cols-2 gap-3">
+              <PayCell label="Gider (dönem)" value={report.expense} tone="red" />
+              <div
+                className={`rounded-2xl border p-4 shadow-sm ${
+                  report.profit >= 0
+                    ? "border-green-200 bg-green-50"
+                    : "border-red-200 bg-red-50"
+                }`}
+              >
+                <span className="text-sm text-zinc-500">Net (kâr/zarar)</span>
+                <p
+                  className={`mt-1 text-xl font-bold tabular-nums ${
+                    report.profit >= 0 ? "text-green-700" : "text-red-700"
+                  }`}
+                >
+                  {formatTRY(report.profit)}
+                </p>
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-zinc-400">
+              Net = ciro − dönem gideri (işletme görünümü, kuruşu kuruşuna
+              muhasebe değil).
+            </p>
+          </Section>
+
+          {/* Açık bakiyeler — anlık (dönemden bağımsız) */}
+          <Section title="Açık Bakiye (anlık)">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <span className="text-sm text-zinc-500">Açık alacak</span>
+                <p className="mt-1 text-xl font-bold tabular-nums text-amber-800">
+                  {formatTRY(report.openReceivable)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <span className="text-sm text-zinc-500">Açık borç</span>
+                <p className="mt-1 text-xl font-bold tabular-nums text-red-700">
+                  {formatTRY(report.openPayable)}
+                </p>
+              </div>
+            </div>
+          </Section>
 
           {report.orderCount === 0 ? (
             <p className="text-sm text-zinc-500">
@@ -286,9 +375,14 @@ function PayCell({
 }: {
   label: string;
   value: number;
-  tone: "green" | "sky";
+  tone: "green" | "sky" | "red";
 }) {
-  const color = tone === "green" ? "text-green-700" : "text-sky-700";
+  const color =
+    tone === "green"
+      ? "text-green-700"
+      : tone === "red"
+        ? "text-red-700"
+        : "text-sky-700";
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
       <span className="text-sm text-zinc-500">{label}</span>

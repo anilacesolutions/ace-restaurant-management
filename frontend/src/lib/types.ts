@@ -201,6 +201,10 @@ export interface SalesReport {
   payment: Record<string, Kurus>; // "nakit","kart",... -> gross
   kdv: Record<string, Kurus>; // "10","20" -> tax portion
   topItems: ItemStat[];
+  expense: Kurus; // giderler in range
+  profit: Kurus; // revenue - expense
+  openReceivable: Kurus; // outstanding owed to us (snapshot)
+  openPayable: Kurus; // outstanding we owe (snapshot)
 }
 
 export interface User {

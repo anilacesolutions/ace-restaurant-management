@@ -1,6 +1,7 @@
 package report
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -28,6 +29,28 @@ func NewHandler(svc *Service, defaultRestaurantID string, loc *time.Location) (*
 // MountAdmin mounts the reports endpoints — admin only.
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/reports/sales", h.sales)
+	r.Post("/reports/print", h.print)
+}
+
+func (h *Handler) print(w http.ResponseWriter, r *http.Request) {
+	from := h.parseDay(r.URL.Query().Get("from"))
+	to := h.parseDay(r.URL.Query().Get("to"))
+	title := r.URL.Query().Get("title")
+	if title == "" {
+		title = "GUN SONU RAPORU"
+	}
+	label := r.URL.Query().Get("label")
+
+	if err := h.svc.PrintReport(r.Context(), h.restaurantID, from, to, title, label); err != nil {
+		var verr ErrValidation
+		if errors.As(err, &verr) {
+			httpx.WriteError(w, http.StatusBadRequest, verr.Msg)
+			return
+		}
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) sales(w http.ResponseWriter, r *http.Request) {

@@ -5,21 +5,41 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
 	"github.com/ace-solutions/restaurant-backend/internal/domain"
+	"github.com/ace-solutions/restaurant-backend/internal/mqttx"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-type Service struct {
-	db *mongo.Database
+// publisher is the slice of *mqttx.Client the service needs; nil disables print.
+type publisher interface {
+	Publish(topic string, qos byte, retained bool, payload []byte) error
 }
 
-func New(db *mongo.Database) *Service { return &Service{db: db} }
+type Service struct {
+	db  *mongo.Database
+	pub publisher // may be nil when realtime/print is disabled
+}
+
+func New(db *mongo.Database, pub publisher) *Service {
+	// A typed-nil *mqttx.Client would be a non-nil interface; guard for that.
+	if c, ok := pub.(*mqttx.Client); ok && c == nil {
+		pub = nil
+	}
+	return &Service{db: db, pub: pub}
+}
+
+// ErrValidation wraps a user-facing message (maps to HTTP 400).
+type ErrValidation struct{ Msg string }
+
+func (e ErrValidation) Error() string { return e.Msg }
 
 // ItemStat is one line in the best-sellers list.
 type ItemStat struct {
@@ -30,6 +50,10 @@ type ItemStat struct {
 
 // SalesReport aggregates one date range. Revenue is gross (KDV-included); Net is
 // the matrah (tax-excluded); KDV maps rate -> tax portion.
+//
+// Financial overview: Expense is spending in the range (by spentAt), Profit is
+// Revenue-Expense. OpenReceivable/OpenPayable are current snapshots (all-time
+// outstanding, NOT range-scoped) — what's owed to us vs what we owe.
 type SalesReport struct {
 	Revenue    domain.Kurus            `json:"revenue"`
 	Net        domain.Kurus            `json:"net"`
@@ -38,6 +62,11 @@ type SalesReport struct {
 	Payment    map[string]domain.Kurus `json:"payment"` // "nakit","kart",... -> gross
 	KDV        map[string]domain.Kurus `json:"kdv"`     // "10","20" -> tax portion
 	TopItems   []ItemStat              `json:"topItems"`
+
+	Expense        domain.Kurus `json:"expense"`        // giderler in range (by spentAt)
+	Profit         domain.Kurus `json:"profit"`         // Revenue - Expense
+	OpenReceivable domain.Kurus `json:"openReceivable"` // outstanding owed TO us (now)
+	OpenPayable    domain.Kurus `json:"openPayable"`    // outstanding we owe (now)
 }
 
 // Sales aggregates closed orders whose closedAt is in [from, to).
@@ -112,7 +141,86 @@ func (s *Service) Sales(ctx context.Context, restaurantID bson.ObjectID, from, t
 	}
 
 	rep.TopItems = topItems(items, 20)
+
+	// Financial overview.
+	exp, err := s.sumExpenses(ctx, restaurantID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	rep.Expense = exp
+	rep.Profit = rep.Revenue - exp
+
+	rep.OpenReceivable, err = s.outstanding(ctx, "receivables", restaurantID)
+	if err != nil {
+		return nil, err
+	}
+	rep.OpenPayable, err = s.outstanding(ctx, "expenses", restaurantID)
+	if err != nil {
+		return nil, err
+	}
+
 	return rep, nil
+}
+
+// sumExpenses totals expense amounts whose spentAt is in [from, to).
+func (s *Service) sumExpenses(ctx context.Context, restaurantID bson.ObjectID, from, to time.Time) (domain.Kurus, error) {
+	filter := bson.M{"restaurantId": restaurantID}
+	rng := bson.M{}
+	if !from.IsZero() {
+		rng["$gte"] = from
+	}
+	if !to.IsZero() {
+		rng["$lt"] = to
+	}
+	if len(rng) > 0 {
+		filter["spentAt"] = rng
+	}
+	cur, err := s.db.Collection("expenses").Find(ctx, filter,
+		options.Find().SetProjection(bson.M{"amount": 1}))
+	if err != nil {
+		return 0, fmt.Errorf("find expenses: %w", err)
+	}
+	var rows []struct {
+		Amount domain.Kurus `bson:"amount"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return 0, fmt.Errorf("decode expenses: %w", err)
+	}
+	var total domain.Kurus
+	for _, r := range rows {
+		total += r.Amount
+	}
+	return total, nil
+}
+
+// outstanding sums (amount - paid) across every doc in a collection that carries
+// an amount + payments[] (expenses and receivables share this shape). It's a
+// current snapshot — NOT date-scoped — so open balances reflect reality now.
+func (s *Service) outstanding(ctx context.Context, coll string, restaurantID bson.ObjectID) (domain.Kurus, error) {
+	cur, err := s.db.Collection(coll).Find(ctx,
+		bson.M{"restaurantId": restaurantID},
+		options.Find().SetProjection(bson.M{"amount": 1, "payments": 1}))
+	if err != nil {
+		return 0, fmt.Errorf("find %s: %w", coll, err)
+	}
+	var rows []struct {
+		Amount   domain.Kurus `bson:"amount"`
+		Payments []struct {
+			Amount domain.Kurus `bson:"amount"`
+		} `bson:"payments"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return 0, fmt.Errorf("decode %s: %w", coll, err)
+	}
+	var open domain.Kurus
+	for _, r := range rows {
+		paid := domain.Kurus(0)
+		for _, p := range r.Payments {
+			paid += p.Amount
+		}
+		open += r.Amount - paid
+	}
+	return open, nil
 }
 
 // topItems returns the n most-sold items by quantity (revenue breaks ties).
@@ -134,4 +242,72 @@ func topItems(m map[string]*ItemStat, n int) []ItemStat {
 		out = out[:n]
 	}
 	return out
+}
+
+// --- end-of-day report print ----------------------------------------------
+
+// reportPrint is the wire format published on report/print for the bridge.
+// Keep in sync with the bridge reportPrintMsg. Money is integer kuruş.
+type reportPrint struct {
+	Title          string                  `json:"title"`
+	RangeLabel     string                  `json:"rangeLabel"`
+	Revenue        domain.Kurus            `json:"revenue"`
+	OrderCount     int                     `json:"orderCount"`
+	Payment        map[string]domain.Kurus `json:"payment"`
+	KDV            map[string]domain.Kurus `json:"kdv"`
+	OTV            domain.Kurus            `json:"otv"`
+	Expense        domain.Kurus            `json:"expense"`
+	Profit         domain.Kurus            `json:"profit"`
+	OpenReceivable domain.Kurus            `json:"openReceivable"`
+	OpenPayable    domain.Kurus            `json:"openPayable"`
+	TopItems       []reportItem            `json:"topItems"`
+}
+
+type reportItem struct {
+	Name string `json:"name"`
+	Qty  int    `json:"qty"`
+}
+
+// PrintReport builds the report for the range and publishes it to the register
+// bridge, which prints it on the report printer (58mm). title/rangeLabel are the
+// human strings shown at the top of the printout.
+func (s *Service) PrintReport(ctx context.Context, restaurantID bson.ObjectID, from, to time.Time, title, rangeLabel string) error {
+	if s.pub == nil {
+		return ErrValidation{"Yazıcı servisi kapalı (MQTT yok)"}
+	}
+	rep, err := s.Sales(ctx, restaurantID, from, to)
+	if err != nil {
+		return err
+	}
+
+	msg := reportPrint{
+		Title:          title,
+		RangeLabel:     rangeLabel,
+		Revenue:        rep.Revenue,
+		OrderCount:     rep.OrderCount,
+		Payment:        rep.Payment,
+		KDV:            rep.KDV,
+		OTV:            rep.OTV,
+		Expense:        rep.Expense,
+		Profit:         rep.Profit,
+		OpenReceivable: rep.OpenReceivable,
+		OpenPayable:    rep.OpenPayable,
+	}
+	// Top 10 items on the printout (keep paper reasonable).
+	for i, it := range rep.TopItems {
+		if i >= 10 {
+			break
+		}
+		msg.TopItems = append(msg.TopItems, reportItem{Name: it.Name, Qty: it.Qty})
+	}
+
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("report marshal: %w", err)
+	}
+	if err := s.pub.Publish(mqttx.ReportPrint(restaurantID.Hex()), mqttx.QoSAtLeastOnce, false, payload); err != nil {
+		return fmt.Errorf("report publish: %w", err)
+	}
+	slog.Info("report printed", "range", rangeLabel)
+	return nil
 }

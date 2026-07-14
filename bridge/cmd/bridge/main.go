@@ -44,6 +44,26 @@ type adisyonPrintMsg struct {
 	GrandTotal int64            `json:"grandTotal"`
 }
 
+// reportPrintMsg is the wire format the backend publishes on
+// restaurant/{id}/report/print (end-of-day report). Money is integer kuruş.
+type reportPrintMsg struct {
+	Title          string           `json:"title"`
+	RangeLabel     string           `json:"rangeLabel"`
+	Revenue        int64            `json:"revenue"`
+	OrderCount     int              `json:"orderCount"`
+	Payment        map[string]int64 `json:"payment"`
+	KDV            map[string]int64 `json:"kdv"`
+	OTV            int64            `json:"otv"`
+	Expense        int64            `json:"expense"`
+	Profit         int64            `json:"profit"`
+	OpenReceivable int64            `json:"openReceivable"`
+	OpenPayable    int64            `json:"openPayable"`
+	TopItems       []struct {
+		Name string `json:"name"`
+		Qty  int    `json:"qty"`
+	} `json:"topItems"`
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -66,6 +86,8 @@ func main() {
 	kitchenPrn.SetLogo(false)
 	adisyonPrn := printer.New(printer.Mode(cfg.PrinterMode), cfg.AdisyonAddr, cfg.AdisyonCols)
 	adisyonPrn.SetLogo(cfg.PrinterLogo)
+	reportPrn := printer.New(printer.Mode(cfg.PrinterMode), cfg.ReportAddr, cfg.ReportCols)
+	reportPrn.SetLogo(cfg.PrinterLogo)
 
 	mq, err := mqttx.Connect(mqttx.Config{
 		Broker:   cfg.MQTTBroker,
@@ -148,9 +170,47 @@ func main() {
 		os.Exit(1)
 	}
 
+	// End-of-day report — the cashier's "Gün Sonu Raporu Bas" (58mm printer).
+	reportTopic := fmt.Sprintf("restaurant/%s/report/print", cfg.RestaurantID)
+	err = mq.Subscribe(reportTopic, 1, func(_ string, payload []byte) {
+		var msg reportPrintMsg
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			slog.Error("bad report payload", "err", err)
+			return
+		}
+		rep := printer.Report{
+			RestaurantName: cfg.RestaurantName,
+			Title:          msg.Title,
+			RangeLabel:     msg.RangeLabel,
+			Revenue:        msg.Revenue,
+			OrderCount:     msg.OrderCount,
+			Payment:        msg.Payment,
+			KDV:            msg.KDV,
+			OTV:            msg.OTV,
+			Expense:        msg.Expense,
+			Profit:         msg.Profit,
+			OpenReceivable: msg.OpenReceivable,
+			OpenPayable:    msg.OpenPayable,
+			PrintedAt:      time.Now(),
+		}
+		for _, it := range msg.TopItems {
+			rep.TopItems = append(rep.TopItems, printer.ReportItem{Name: it.Name, Qty: it.Qty})
+		}
+		if err := reportPrn.PrintReport(rep); err != nil {
+			slog.Error("report print failed", "err", err)
+			return
+		}
+		slog.Info("report printed", "range", msg.RangeLabel)
+	})
+	if err != nil {
+		slog.Error("subscribe failed", "topic", reportTopic, "err", err)
+		os.Exit(1)
+	}
+
 	slog.Info("bridge ready", "restaurant", cfg.RestaurantID, "mode", cfg.PrinterMode,
 		"kitchenPrinter", cfg.KitchenAddr, "kitchenCols", cfg.KitchenCols,
-		"adisyonPrinter", cfg.AdisyonAddr, "adisyonCols", cfg.AdisyonCols)
+		"adisyonPrinter", cfg.AdisyonAddr, "adisyonCols", cfg.AdisyonCols,
+		"reportPrinter", cfg.ReportAddr, "reportCols", cfg.ReportCols)
 
 	<-ctx.Done()
 	slog.Info("shutting down")

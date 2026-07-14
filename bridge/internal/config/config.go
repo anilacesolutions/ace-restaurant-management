@@ -24,6 +24,8 @@ type Config struct {
 	KitchenCols int    // 58mm=32
 	AdisyonAddr string // adisyon printer (e.g. new 80mm)
 	AdisyonCols int    // 80mm=48
+	ReportAddr  string // end-of-day report printer (the free 58mm)
+	ReportCols  int    // 58mm=32
 }
 
 func Load() (*Config, error) {
@@ -43,6 +45,8 @@ func Load() (*Config, error) {
 		KitchenCols:    getEnvInt("KITCHEN_PRINTER_COLS", sharedCols),
 		AdisyonAddr:    getEnv("ADISYON_PRINTER_ADDR", sharedAddr),
 		AdisyonCols:    getEnvInt("ADISYON_PRINTER_COLS", 48),
+		ReportAddr:     getEnv("REPORT_PRINTER_ADDR", sharedAddr),
+		ReportCols:     getEnvInt("REPORT_PRINTER_COLS", 32),
 	}
 	if cfg.RestaurantID == "" {
 		return nil, fmt.Errorf("RESTAURANT_ID is required")

@@ -163,6 +163,117 @@ func (p *Printer) formatReceipt(r Receipt) []byte {
 	return []byte(b.String())
 }
 
+// --- end-of-day report ----------------------------------------------------
+
+// Report is the end-of-day summary the bridge receives via MQTT. Money is
+// integer kuruş.
+type Report struct {
+	RestaurantName string
+	Title          string
+	RangeLabel     string
+	Revenue        int64
+	OrderCount     int
+	Payment        map[string]int64 // "nakit","kart",... -> gross
+	KDV            map[string]int64 // "10","20" -> tax portion
+	OTV            int64
+	Expense        int64
+	Profit         int64
+	OpenReceivable int64
+	OpenPayable    int64
+	TopItems       []ReportItem
+	PrintedAt      time.Time
+}
+
+type ReportItem struct {
+	Name string
+	Qty  int
+}
+
+// PrintReport formats and sends the end-of-day report.
+func (p *Printer) PrintReport(r Report) error {
+	return p.send(p.formatReport(r))
+}
+
+func (p *Printer) formatReport(r Report) []byte {
+	var b strings.Builder
+	p.init(&b)
+	if p.logo && p.mode != ModeStdout {
+		b.Write(LogoRaster())
+	}
+
+	dash := strings.Repeat("-", p.cols)
+	eq := strings.Repeat("=", p.cols)
+
+	name := asciiCaps(r.RestaurantName)
+	if name == "" {
+		name = "RAPOR"
+	}
+	title := asciiCaps(r.Title)
+	if title == "" {
+		title = "GUN SONU RAPORU"
+	}
+	b.WriteString(center(name, p.cols) + "\n")
+	b.WriteString(center(title, p.cols) + "\n")
+	if r.RangeLabel != "" {
+		b.WriteString(center(asciiCaps(r.RangeLabel), p.cols) + "\n")
+	}
+	if !r.PrintedAt.IsZero() {
+		b.WriteString(center(r.PrintedAt.Format("02.01.2006 15:04"), p.cols) + "\n")
+	}
+	b.WriteString(eq + "\n")
+
+	b.WriteString(row("CIRO", money(r.Revenue), p.cols) + "\n")
+	b.WriteString(row("HESAP", fmt.Sprintf("%d", r.OrderCount), p.cols) + "\n")
+	b.WriteString(dash + "\n")
+
+	// Ödeme
+	if v, ok := r.Payment["nakit"]; ok && v != 0 {
+		b.WriteString(row("NAKIT", money(v), p.cols) + "\n")
+	}
+	if v, ok := r.Payment["kart"]; ok && v != 0 {
+		b.WriteString(row("KART", money(v), p.cols) + "\n")
+	}
+	for m, v := range r.Payment {
+		if m == "nakit" || m == "kart" || v == 0 {
+			continue
+		}
+		b.WriteString(row(asciiCaps(m), money(v), p.cols) + "\n")
+	}
+	b.WriteString(dash + "\n")
+
+	// KDV
+	for _, rate := range []string{"1", "10", "20"} {
+		if v, ok := r.KDV[rate]; ok && v > 0 {
+			b.WriteString(row("KDV %"+rate, money(v), p.cols) + "\n")
+		}
+	}
+	if r.OTV > 0 {
+		b.WriteString(row("OTV", money(r.OTV), p.cols) + "\n")
+	}
+	b.WriteString(dash + "\n")
+
+	// Finansal
+	b.WriteString(row("GIDER", money(r.Expense), p.cols) + "\n")
+	b.WriteString(row("NET (KAR)", money(r.Profit), p.cols) + "\n")
+	b.WriteString(dash + "\n")
+	b.WriteString(row("ACIK ALACAK", money(r.OpenReceivable), p.cols) + "\n")
+	b.WriteString(row("ACIK BORC", money(r.OpenPayable), p.cols) + "\n")
+
+	// En çok satan
+	if len(r.TopItems) > 0 {
+		b.WriteString(eq + "\n")
+		b.WriteString(center("EN COK SATAN", p.cols) + "\n")
+		b.WriteString(dash + "\n")
+		for _, it := range r.TopItems {
+			b.WriteString(row(asciiCaps(it.Name), fmt.Sprintf("%d", it.Qty), p.cols) + "\n")
+		}
+	}
+
+	b.WriteString(eq + "\n")
+	p.cut(&b)
+	return []byte(b.String())
+}
+
 // --- shared ESC/POS + transport ------------------------------------------
 
 func (p *Printer) init(b *strings.Builder) {
