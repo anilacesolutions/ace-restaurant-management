@@ -22,6 +22,21 @@ function todayISO(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 }
 
+// Accent-insensitive fold so "sis" matches "Şiş", "unlu" matches "Ünlü".
+function fold(s: string): string {
+  return s
+    .toLocaleLowerCase("tr")
+    .replaceAll("ı", "i")
+    .replaceAll("ş", "s")
+    .replaceAll("ç", "c")
+    .replaceAll("ğ", "g")
+    .replaceAll("ö", "o")
+    .replaceAll("ü", "u")
+    .replaceAll("â", "a")
+    .replaceAll("î", "i")
+    .replaceAll("û", "u");
+}
+
 type Tab = "cariler" | "hareketler";
 
 export default function ErpCariPage() {
@@ -59,11 +74,9 @@ export default function ErpCariPage() {
   // Turkish-insensitive name search over the cari list.
   const filtered = useMemo(() => {
     if (parties === null) return null;
-    const needle = q.trim().toLocaleLowerCase("tr");
+    const needle = fold(q.trim());
     if (!needle) return parties;
-    return parties.filter((p) =>
-      p.name.toLocaleLowerCase("tr").includes(needle),
-    );
+    return parties.filter((p) => fold(p.name).includes(needle));
   }, [parties, q]);
 
   return (
