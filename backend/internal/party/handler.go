@@ -27,8 +27,23 @@ func NewHandler(svc *Service, defaultRestaurantID string) (*Handler, error) {
 // MountAdmin mounts the cari / kişiler list — admin only.
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/parties", h.list)
+	r.Get("/parties/{id}", h.ledger)
 	r.Post("/parties", h.create)
 	r.Delete("/parties/{id}", h.delete)
+}
+
+func (h *Handler) ledger(w http.ResponseWriter, r *http.Request) {
+	id, err := bson.ObjectIDFromHex(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "geçersiz id")
+		return
+	}
+	l, err := h.svc.GetLedger(r.Context(), h.restaurantID, id)
+	if err != nil {
+		h.writeServiceError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, l)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

@@ -160,11 +160,12 @@ export interface Party {
   note?: string;
   active: boolean;
   createdAt: string;
-  // summary (kuruş) — debt across all their expenses, paid, and remaining
-  debt: Kurus;
-  paid: Kurus;
-  remaining: Kurus;
-  expenseCount: number;
+  // cari-hesap balance (kuruş). borc = we still owe them (unpaid expenses),
+  // alacak = they still owe us (uncollected receivables), net = alacak - borc.
+  borc: Kurus;
+  alacak: Kurus;
+  net: Kurus;
+  movementCount: number;
 }
 
 export interface PartiesResponse {
@@ -174,7 +175,9 @@ export interface PartiesResponse {
 export interface Receivable {
   id: string;
   restaurantId: string;
-  personName: string;
+  partyId?: string;
+  partyName?: string;
+  personName?: string; // legacy free text (pre-cari rows)
   amount: Kurus;
   note?: string;
   issuedAt: string; // RFC3339
@@ -185,6 +188,24 @@ export interface Receivable {
 
 export interface ReceivablesResponse {
   receivables: Receivable[];
+}
+
+// The full cari-hesap statement for one party: its movements on both sides plus
+// the net balance. Net > 0 = they owe us, Net < 0 = we owe them.
+export interface PartyLedger {
+  party: {
+    id: string;
+    restaurantId: string;
+    name: string;
+    note?: string;
+    active: boolean;
+    createdAt: string;
+  };
+  expenses: Expense[];
+  receivables: Receivable[];
+  borc: Kurus; // we owe them
+  alacak: Kurus; // they owe us
+  net: Kurus; // alacak - borc
 }
 
 export interface ItemStat {

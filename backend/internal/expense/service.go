@@ -52,6 +52,11 @@ type Input struct {
 	PartyID  string       `json:"partyId"`
 	Note     string       `json:"note"`
 	SpentAt  string       `json:"spentAt"`
+	// Paid marks the expense as already settled at entry time — the common case
+	// ("faturayı ödeyince giriyorum"). When true, a full payment for Amount is
+	// recorded on SpentAt so the cari balance stays clean. When false, it sits as
+	// an open borç to be paid later.
+	Paid bool `json:"paid"`
 }
 
 // Create validates the input and inserts one expense row.
@@ -95,6 +100,16 @@ func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.Objec
 		SpentAt:      spentAt,
 		CreatedBy:    createdBy,
 		CreatedAt:    now,
+	}
+	// Default case: paid on entry — settle it in full on the spent day so the
+	// cari balance nets to zero without a second trip into the record.
+	if in.Paid {
+		exp.Payments = []domain.Payment{{
+			ID:     bson.NewObjectID(),
+			Amount: in.Amount,
+			PaidAt: spentAt,
+			Note:   "girişte ödendi",
+		}}
 	}
 	if _, err := s.coll().InsertOne(ctx, exp); err != nil {
 		return nil, fmt.Errorf("insert expense: %w", err)

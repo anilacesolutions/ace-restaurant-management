@@ -139,11 +139,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	receivableSvc := receivable.New(mongoX.DB, istanbul)
+	receivableSvc := receivable.New(mongoX.DB, istanbul, partySvc)
 	receivableH, err := receivable.NewHandler(receivableSvc, cfg.DefaultRestaurantID, istanbul)
 	if err != nil {
 		slog.Error("receivable handler init failed", "err", err)
 		os.Exit(1)
+	}
+	// Attach any pre-cari (free-text) receivables to a cari. Idempotent.
+	if rid, err := bson.ObjectIDFromHex(cfg.DefaultRestaurantID); err == nil {
+		if err := receivableSvc.BackfillParties(context.Background(), rid, time.Now()); err != nil {
+			slog.Warn("receivable cari backfill failed", "err", err)
+		}
 	}
 
 	reportSvc := report.New(mongoX.DB, mqttClient)

@@ -26,31 +26,36 @@ func (e ErrValidation) Error() string { return e.Msg }
 
 const dateLayout = "2006-01-02"
 
-type Service struct {
-	db  *mongo.Database
-	loc *time.Location // Istanbul — IssuedAt is a calendar day in local time
+// PartyResolver resolves a cari so a receivable can be attached to it and its
+// name snapshotted. The party package satisfies this.
+type PartyResolver interface {
+	Get(ctx context.Context, restaurantID, id bson.ObjectID) (domain.Party, error)
+	EnsureByName(ctx context.Context, restaurantID bson.ObjectID, name string, now time.Time) (domain.Party, error)
 }
 
-func New(db *mongo.Database, loc *time.Location) *Service {
-	return &Service{db: db, loc: loc}
+type Service struct {
+	db      *mongo.Database
+	loc     *time.Location // Istanbul — IssuedAt is a calendar day in local time
+	parties PartyResolver
+}
+
+func New(db *mongo.Database, loc *time.Location, parties PartyResolver) *Service {
+	return &Service{db: db, loc: loc, parties: parties}
 }
 
 func (s *Service) coll() *mongo.Collection { return s.db.Collection("receivables") }
 
-// Input is the create payload. IssuedAt is a "YYYY-MM-DD" calendar day.
+// Input is the create payload. IssuedAt is a "YYYY-MM-DD" calendar day. A
+// receivable now attaches to a cari (PartyID) — same as an expense.
 type Input struct {
-	PersonName string       `json:"personName"`
-	Amount     domain.Kurus `json:"amount"`
-	Note       string       `json:"note"`
-	IssuedAt   string       `json:"issuedAt"`
+	PartyID  string       `json:"partyId"`
+	Amount   domain.Kurus `json:"amount"`
+	Note     string       `json:"note"`
+	IssuedAt string       `json:"issuedAt"`
 }
 
-// Create validates the input and inserts one receivable row.
+// Create validates the input and inserts one receivable row against a cari.
 func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.ObjectID, in Input, now time.Time) (*domain.Receivable, error) {
-	name := strings.TrimSpace(in.PersonName)
-	if name == "" {
-		return nil, ErrValidation{"Kim borçlu, isim girilmeli"}
-	}
 	if in.Amount <= 0 {
 		return nil, ErrValidation{"Tutar 0'dan büyük olmalı"}
 	}
@@ -59,10 +64,25 @@ func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.Objec
 		return nil, ErrValidation{"Geçerli bir tarih girilmeli"}
 	}
 
+	raw := strings.TrimSpace(in.PartyID)
+	if raw == "" {
+		return nil, ErrValidation{"Cari seçilmeli"}
+	}
+	pid, err := bson.ObjectIDFromHex(raw)
+	if err != nil {
+		return nil, ErrValidation{"Geçersiz cari"}
+	}
+	p, err := s.parties.Get(ctx, restaurantID, pid)
+	if err != nil {
+		return nil, ErrValidation{"Cari bulunamadı"}
+	}
+
 	r := domain.Receivable{
 		ID:           bson.NewObjectID(),
 		RestaurantID: restaurantID,
-		PersonName:   name,
+		PartyID:      p.ID,
+		PartyName:    p.Name,
+		PersonName:   p.Name,
 		Amount:       in.Amount,
 		Note:         strings.TrimSpace(in.Note),
 		IssuedAt:     issuedAt,
@@ -73,6 +93,39 @@ func (s *Service) Create(ctx context.Context, restaurantID, createdBy bson.Objec
 		return nil, fmt.Errorf("insert receivable: %w", err)
 	}
 	return &r, nil
+}
+
+// BackfillParties attaches legacy free-text receivables (no partyId) to a cari,
+// creating one per distinct personName. Idempotent — only touches rows still
+// missing a partyId — so it's safe to run on every boot.
+func (s *Service) BackfillParties(ctx context.Context, restaurantID bson.ObjectID, now time.Time) error {
+	cur, err := s.coll().Find(ctx, bson.M{
+		"restaurantId": restaurantID,
+		"partyId":      bson.M{"$exists": false},
+	})
+	if err != nil {
+		return fmt.Errorf("find legacy receivables: %w", err)
+	}
+	var legacy []domain.Receivable
+	if err := cur.All(ctx, &legacy); err != nil {
+		return fmt.Errorf("decode legacy receivables: %w", err)
+	}
+	for _, r := range legacy {
+		name := strings.TrimSpace(r.PersonName)
+		if name == "" {
+			name = "Bilinmeyen"
+		}
+		p, err := s.parties.EnsureByName(ctx, restaurantID, name, now)
+		if err != nil {
+			return fmt.Errorf("ensure cari %q: %w", name, err)
+		}
+		if _, err := s.coll().UpdateByID(ctx, r.ID, bson.M{
+			"$set": bson.M{"partyId": p.ID, "partyName": p.Name},
+		}); err != nil {
+			return fmt.Errorf("attach receivable %s: %w", r.ID.Hex(), err)
+		}
+	}
+	return nil
 }
 
 // List returns receivables in [from, to) newest-first. A zero from/to is open.

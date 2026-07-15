@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -44,17 +45,19 @@ func (s *Service) Get(ctx context.Context, restaurantID, id bson.ObjectID) (doma
 	return p, nil
 }
 
-// PartyWithSummary is a party plus its money totals (kuruş). Debt is the sum of
-// expense amounts, Paid the sum of settlements, Remaining = Debt - Paid.
+// PartyWithSummary is a party plus its cari-hesap balance (kuruş). A cari is a
+// two-sided ledger now: Borc is what WE still owe them (unpaid expenses), Alacak
+// is what THEY still owe us (uncollected receivables). Net = Alacak - Borc:
+// positive means they owe us, negative means we owe them.
 type PartyWithSummary struct {
-	domain.Party `bson:",inline"`
-	Debt         domain.Kurus `json:"debt"`
-	Paid         domain.Kurus `json:"paid"`
-	Remaining    domain.Kurus `json:"remaining"`
-	ExpenseCount int          `json:"expenseCount"`
+	domain.Party  `bson:",inline"`
+	Borc          domain.Kurus `json:"borc"`   // we still owe them
+	Alacak        domain.Kurus `json:"alacak"` // they still owe us
+	Net           domain.Kurus `json:"net"`    // alacak - borc
+	MovementCount int          `json:"movementCount"`
 }
 
-// List returns all active parties with their debt/paid summary, sorted by name.
+// List returns all active parties with their cari-hesap balance, sorted by name.
 func (s *Service) List(ctx context.Context, restaurantID bson.ObjectID) ([]PartyWithSummary, error) {
 	cur, err := s.coll().Find(ctx,
 		bson.M{"restaurantId": restaurantID, "active": true},
@@ -77,10 +80,10 @@ func (s *Service) List(ctx context.Context, restaurantID bson.ObjectID) ([]Party
 	for _, p := range parties {
 		row := PartyWithSummary{Party: p}
 		if sm, ok := sums[p.ID]; ok {
-			row.Debt = sm.debt
-			row.Paid = sm.paid
-			row.Remaining = sm.debt - sm.paid
-			row.ExpenseCount = sm.count
+			row.Borc = sm.borc
+			row.Alacak = sm.alacak
+			row.Net = sm.alacak - sm.borc
+			row.MovementCount = sm.count
 		}
 		out = append(out, row)
 	}
@@ -88,14 +91,18 @@ func (s *Service) List(ctx context.Context, restaurantID bson.ObjectID) ([]Party
 }
 
 type partySum struct {
-	debt  domain.Kurus
-	paid  domain.Kurus
-	count int
+	borc   domain.Kurus // unpaid expenses (we owe them)
+	alacak domain.Kurus // uncollected receivables (they owe us)
+	count  int          // total movements (expenses + receivables)
 }
 
-// summaries aggregates expenses by partyId across ALL time (a cari balance is
-// not date-scoped). paid sums every payment on each expense.
-func (s *Service) summaries(ctx context.Context, restaurantID bson.ObjectID) (map[bson.ObjectID]partySum, error) {
+// remainingByParty sums (amount - paid) per partyId over a collection whose docs
+// carry `amount` and a `payments` array. Used for both expenses (→ borç) and
+// receivables (→ alacak); a cari balance is not date-scoped, so all time.
+func (s *Service) remainingByParty(ctx context.Context, coll string, restaurantID bson.ObjectID) (map[bson.ObjectID]struct {
+	rem   domain.Kurus
+	count int
+}, error) {
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{
 			"restaurantId": restaurantID,
@@ -103,29 +110,118 @@ func (s *Service) summaries(ctx context.Context, restaurantID bson.ObjectID) (ma
 		}}},
 		{{Key: "$group", Value: bson.M{
 			"_id":   "$partyId",
-			"debt":  bson.M{"$sum": "$amount"},
-			"paid":  bson.M{"$sum": bson.M{"$sum": "$payments.amount"}},
+			"rem":   bson.M{"$sum": bson.M{"$subtract": bson.A{"$amount", bson.M{"$sum": "$payments.amount"}}}},
 			"count": bson.M{"$sum": 1},
 		}}},
 	}
-	cur, err := s.db.Collection("expenses").Aggregate(ctx, pipeline)
+	cur, err := s.db.Collection(coll).Aggregate(ctx, pipeline)
 	if err != nil {
-		return nil, fmt.Errorf("aggregate party sums: %w", err)
+		return nil, fmt.Errorf("aggregate %s sums: %w", coll, err)
 	}
 	var rows []struct {
 		ID    bson.ObjectID `bson:"_id"`
-		Debt  domain.Kurus  `bson:"debt"`
-		Paid  domain.Kurus  `bson:"paid"`
+		Rem   domain.Kurus  `bson:"rem"`
 		Count int           `bson:"count"`
 	}
 	if err := cur.All(ctx, &rows); err != nil {
-		return nil, fmt.Errorf("decode party sums: %w", err)
+		return nil, fmt.Errorf("decode %s sums: %w", coll, err)
 	}
-	m := make(map[bson.ObjectID]partySum, len(rows))
+	m := make(map[bson.ObjectID]struct {
+		rem   domain.Kurus
+		count int
+	}, len(rows))
 	for _, r := range rows {
-		m[r.ID] = partySum{debt: r.Debt, paid: r.Paid, count: r.Count}
+		m[r.ID] = struct {
+			rem   domain.Kurus
+			count int
+		}{rem: r.Rem, count: r.Count}
 	}
 	return m, nil
+}
+
+// summaries combines the expense (borç) and receivable (alacak) sides into one
+// net balance per cari.
+func (s *Service) summaries(ctx context.Context, restaurantID bson.ObjectID) (map[bson.ObjectID]partySum, error) {
+	exp, err := s.remainingByParty(ctx, "expenses", restaurantID)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := s.remainingByParty(ctx, "receivables", restaurantID)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[bson.ObjectID]partySum, len(exp)+len(rec))
+	for id, e := range exp {
+		sm := m[id]
+		sm.borc += e.rem
+		sm.count += e.count
+		m[id] = sm
+	}
+	for id, r := range rec {
+		sm := m[id]
+		sm.alacak += r.rem
+		sm.count += r.count
+		m[id] = sm
+	}
+	return m, nil
+}
+
+// Ledger is a single cari's full statement: the party, its movements (expenses
+// = money we owe, receivables = money owed to us), and the net balance.
+type Ledger struct {
+	Party       domain.Party        `json:"party"`
+	Expenses    []domain.Expense    `json:"expenses"`
+	Receivables []domain.Receivable `json:"receivables"`
+	Borc        domain.Kurus        `json:"borc"`
+	Alacak      domain.Kurus        `json:"alacak"`
+	Net         domain.Kurus        `json:"net"`
+}
+
+// GetLedger returns one cari with all its expenses and receivables, newest-first.
+func (s *Service) GetLedger(ctx context.Context, restaurantID, id bson.ObjectID) (*Ledger, error) {
+	p, err := s.Get(ctx, restaurantID, id)
+	if err != nil {
+		return nil, err
+	}
+	l := &Ledger{Party: p, Expenses: []domain.Expense{}, Receivables: []domain.Receivable{}}
+
+	expCur, err := s.db.Collection("expenses").Find(ctx,
+		bson.M{"restaurantId": restaurantID, "partyId": id},
+		options.Find().SetSort(bson.D{{Key: "spentAt", Value: -1}, {Key: "createdAt", Value: -1}}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find cari expenses: %w", err)
+	}
+	if err := expCur.All(ctx, &l.Expenses); err != nil {
+		return nil, fmt.Errorf("decode cari expenses: %w", err)
+	}
+	recCur, err := s.db.Collection("receivables").Find(ctx,
+		bson.M{"restaurantId": restaurantID, "partyId": id},
+		options.Find().SetSort(bson.D{{Key: "issuedAt", Value: -1}, {Key: "createdAt", Value: -1}}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find cari receivables: %w", err)
+	}
+	if err := recCur.All(ctx, &l.Receivables); err != nil {
+		return nil, fmt.Errorf("decode cari receivables: %w", err)
+	}
+
+	for _, e := range l.Expenses {
+		paid := domain.Kurus(0)
+		for _, pay := range e.Payments {
+			paid += pay.Amount
+		}
+		l.Borc += e.Amount - paid
+	}
+	for _, r := range l.Receivables {
+		coll := domain.Kurus(0)
+		for _, pay := range r.Payments {
+			coll += pay.Amount
+		}
+		l.Alacak += r.Amount - coll
+	}
+	l.Net = l.Alacak - l.Borc
+	return l, nil
 }
 
 // Input is the create payload.
@@ -152,6 +248,28 @@ func (s *Service) Create(ctx context.Context, restaurantID bson.ObjectID, in Inp
 		return domain.Party{}, fmt.Errorf("insert party: %w", err)
 	}
 	return p, nil
+}
+
+// EnsureByName returns an active cari whose name matches (case-insensitive,
+// trimmed), creating one if none exists. Used to backfill legacy free-text
+// receivables onto a cari.
+func (s *Service) EnsureByName(ctx context.Context, restaurantID bson.ObjectID, name string, now time.Time) (domain.Party, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return domain.Party{}, ErrValidation{"İsim zorunlu"}
+	}
+	var p domain.Party
+	err := s.coll().FindOne(ctx, bson.M{
+		"restaurantId": restaurantID,
+		"name":         bson.M{"$regex": "^" + regexp.QuoteMeta(name) + "$", "$options": "i"},
+	}).Decode(&p)
+	if err == nil {
+		return p, nil
+	}
+	if !errors.Is(err, mongo.ErrNoDocuments) {
+		return domain.Party{}, fmt.Errorf("find party by name: %w", err)
+	}
+	return s.Create(ctx, restaurantID, Input{Name: name}, now)
 }
 
 // Delete removes a party. Past expenses keep their snapshotted PartyName, so
