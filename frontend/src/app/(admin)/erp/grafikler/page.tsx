@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { formatTRY } from "@/lib/money";
-import type { SalesReport, TimeSeriesReport, BucketPoint } from "@/lib/types";
+import type {
+  SalesReport,
+  TimeSeriesReport,
+  BucketPoint,
+  WaiterStat,
+  WaiterStatsResponse,
+} from "@/lib/types";
 
 const TZ = "Europe/Istanbul";
 type Bucket = "hour" | "day" | "month";
@@ -76,6 +82,7 @@ export default function ErpGrafiklerPage() {
   const [tab, setTab] = useState<Tab>("bugun");
   const [sales, setSales] = useState<SalesReport | null>(null);
   const [series, setSeries] = useState<TimeSeriesReport | null>(null);
+  const [waiters, setWaiters] = useState<WaiterStat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const rng = useMemo(() => rangeFor(tab), [tab]);
@@ -83,6 +90,7 @@ export default function ErpGrafiklerPage() {
   useEffect(() => {
     setSales(null);
     setSeries(null);
+    setWaiters(null);
     setError(null);
     const qs = `from=${rng.from}&to=${rng.to}`;
     api<SalesReport>(`/api/v1/reports/sales?${qs}`)
@@ -91,9 +99,12 @@ export default function ErpGrafiklerPage() {
     api<TimeSeriesReport>(`/api/v1/reports/timeseries?${qs}&bucket=${rng.bucket}`)
       .then(setSeries)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    api<WaiterStatsResponse>(`/api/v1/reports/waiters?${qs}`)
+      .then((r) => setWaiters(r.waiters))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [rng.from, rng.to, rng.bucket]);
 
-  const loading = sales === null || series === null;
+  const loading = sales === null || series === null || waiters === null;
 
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 pb-24">
@@ -153,6 +164,7 @@ export default function ErpGrafiklerPage() {
             bucket={series.bucket}
             total={series.guests}
           />
+          <WaiterChart waiters={waiters} />
           <PaymentChart payment={sales.payment} />
           <TopItemsChart items={sales.topItems} />
         </>
@@ -321,6 +333,41 @@ function GuestsChart({
             </div>
           ))}
         </div>
+      )}
+    </Card>
+  );
+}
+
+function WaiterChart({ waiters }: { waiters: WaiterStat[] }) {
+  const max = Math.max(1, ...waiters.map((w) => w.revenue));
+  return (
+    <Card title="Garson performansı">
+      {waiters.length === 0 ? (
+        <p className="py-6 text-center text-sm text-zinc-400">Veri yok.</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {waiters.map((w) => (
+            <li key={w.waiterId} className="flex flex-col gap-1">
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="truncate pr-2 font-medium text-zinc-700">
+                  {w.name}
+                </span>
+                <span className="shrink-0 tabular-nums text-zinc-900">
+                  {formatTRY(w.revenue)}
+                  <span className="ml-2 text-xs text-zinc-400">
+                    {w.orders} masa · {w.guests} kişi
+                  </span>
+                </span>
+              </div>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full bg-sky-600"
+                  style={{ width: `${(w.revenue / max) * 100}%` }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );

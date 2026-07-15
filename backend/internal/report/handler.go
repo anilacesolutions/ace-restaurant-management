@@ -30,7 +30,20 @@ func NewHandler(svc *Service, defaultRestaurantID string, loc *time.Location) (*
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/reports/sales", h.sales)
 	r.Get("/reports/timeseries", h.timeseries)
+	r.Get("/reports/waiters", h.waiters)
 	r.Post("/reports/print", h.print)
+}
+
+func (h *Handler) waiters(w http.ResponseWriter, r *http.Request) {
+	from := h.parseDay(r.URL.Query().Get("from"))
+	to := h.parseDay(r.URL.Query().Get("to"))
+
+	stats, err := h.svc.WaiterStats(r.Context(), h.restaurantID, from, to)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"waiters": stats})
 }
 
 func (h *Handler) timeseries(w http.ResponseWriter, r *http.Request) {

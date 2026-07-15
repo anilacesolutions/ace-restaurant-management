@@ -9,6 +9,8 @@ import type {
   Order,
   Table,
   TablesResponse,
+  Waiter,
+  WaitersResponse,
 } from "@/lib/types";
 
 const POLL_MS = 5000;
@@ -16,16 +18,19 @@ const POLL_MS = 5000;
 export default function KasaPage() {
   const [tables, setTables] = useState<Table[] | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     try {
-      const [t, o] = await Promise.all([
+      const [t, o, w] = await Promise.all([
         api<TablesResponse>("/api/v1/tables"),
         api<ActiveOrdersResponse>("/api/v1/orders/active"),
+        api<WaitersResponse>("/api/v1/waiters"),
       ]);
       setTables(t.tables);
       setOrders(o.orders);
+      setWaiters(w.waiters);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -44,6 +49,12 @@ export default function KasaPage() {
     for (const o of orders) m.set(o.tableNumber, o);
     return m;
   }, [orders]);
+
+  const waiterName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const w of waiters) m.set(w.id, w.name);
+    return m;
+  }, [waiters]);
 
   const openCount = orders.length;
   const openTotal = useMemo(
@@ -99,6 +110,7 @@ export default function KasaPage() {
               .filter((it) => it.isFix)
               .reduce((s, it) => s + it.qty, 0);
             const itemCount = live.reduce((s, it) => s + it.qty, 0);
+            const garson = order ? waiterName.get(order.waiterId) : undefined;
             return (
               <li key={t.id}>
                 <Link
@@ -123,6 +135,11 @@ export default function KasaPage() {
                       <span className="text-[10px] font-medium text-amber-700">
                         {fixPeople > 0 ? `${fixPeople} kişi fiks` : `${itemCount} ürün`}
                       </span>
+                      {garson && (
+                        <span className="mt-0.5 max-w-full truncate text-[10px] font-semibold text-sky-700">
+                          {garson}
+                        </span>
+                      )}
                     </>
                   ) : (
                     <span className="mt-1 text-[9px] uppercase tracking-wide text-zinc-400">

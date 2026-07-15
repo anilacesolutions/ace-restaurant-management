@@ -29,6 +29,7 @@ export default function ErpCariPage() {
   const [parties, setParties] = useState<Party[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [q, setQ] = useState("");
 
   async function load() {
     try {
@@ -54,6 +55,16 @@ export default function ErpCariPage() {
     }
     return { alacak, borc };
   }, [parties]);
+
+  // Turkish-insensitive name search over the cari list.
+  const filtered = useMemo(() => {
+    if (parties === null) return null;
+    const needle = q.trim().toLocaleLowerCase("tr");
+    if (!needle) return parties;
+    return parties.filter((p) =>
+      p.name.toLocaleLowerCase("tr").includes(needle),
+    );
+  }, [parties, q]);
 
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 pb-24">
@@ -116,7 +127,20 @@ export default function ErpCariPage() {
       </div>
 
       {tab === "cariler" ? (
-        <CariList parties={parties} onChanged={load} onError={setError} />
+        <>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Cari ara (isim)"
+            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-zinc-900 shadow-sm outline-none focus:border-amber-500"
+          />
+          <CariList
+            parties={filtered}
+            searching={!!q.trim()}
+            onChanged={load}
+            onError={setError}
+          />
+        </>
       ) : (
         <MovementTimeline onError={setError} />
       )}
@@ -159,10 +183,12 @@ function TabButton({
 
 function CariList({
   parties,
+  searching,
   onChanged,
   onError,
 }: {
   parties: Party[] | null;
+  searching: boolean;
   onChanged: () => void | Promise<void>;
   onError: (m: string) => void;
 }) {
@@ -184,7 +210,9 @@ function CariList({
   if (parties === null)
     return <p className="text-sm text-zinc-500">Yukleniyor...</p>;
   if (parties.length === 0)
-    return (
+    return searching ? (
+      <p className="text-sm text-zinc-500">Eşleşen cari yok.</p>
+    ) : (
       <p className="text-sm text-zinc-500">
         Henüz cari yok. + Yeni Cari ile ekleyin (Ahmet Bey, Ünlü Yapı, Kira,
         Maaş, Fatura, Avans...).

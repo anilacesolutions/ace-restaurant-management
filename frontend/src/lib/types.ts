@@ -246,6 +246,18 @@ export interface TimeSeriesReport {
   orderCount: number;
 }
 
+export interface WaiterStat {
+  waiterId: string;
+  name: string;
+  revenue: Kurus;
+  orders: number; // masa (closed orders)
+  guests: number; // fiks kişi
+}
+
+export interface WaiterStatsResponse {
+  waiters: WaiterStat[];
+}
+
 export interface User {
   id: string;
   restaurantId: string;

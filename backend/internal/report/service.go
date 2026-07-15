@@ -320,6 +320,99 @@ func (s *Service) TimeSeries(ctx context.Context, restaurantID bson.ObjectID, fr
 	return rep, nil
 }
 
+// WaiterStat is one waiter's performance over a range: revenue on the tables
+// they opened, how many orders (tables) they closed, and fiks kişi served.
+type WaiterStat struct {
+	WaiterID string       `json:"waiterId"`
+	Name     string       `json:"name"`
+	Revenue  domain.Kurus `json:"revenue"`
+	Orders   int          `json:"orders"`
+	Guests   int          `json:"guests"`
+}
+
+// WaiterStats aggregates closed orders in [from, to) by waiter, resolving names
+// from the waiters collection. Sorted by revenue desc.
+func (s *Service) WaiterStats(ctx context.Context, restaurantID bson.ObjectID, from, to time.Time) ([]WaiterStat, error) {
+	filter := bson.M{"restaurantId": restaurantID, "status": domain.OrderClosed}
+	rng := bson.M{}
+	if !from.IsZero() {
+		rng["$gte"] = from
+	}
+	if !to.IsZero() {
+		rng["$lt"] = to
+	}
+	if len(rng) > 0 {
+		filter["closedAt"] = rng
+	}
+	cur, err := s.db.Collection("orders").Find(ctx, filter,
+		options.Find().SetProjection(bson.M{"waiterId": 1, "grandTotal": 1, "items": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find closed orders: %w", err)
+	}
+	var orders []domain.Order
+	if err := cur.All(ctx, &orders); err != nil {
+		return nil, fmt.Errorf("decode closed orders: %w", err)
+	}
+
+	acc := map[bson.ObjectID]*WaiterStat{}
+	for _, o := range orders {
+		st, ok := acc[o.WaiterID]
+		if !ok {
+			st = &WaiterStat{WaiterID: o.WaiterID.Hex()}
+			acc[o.WaiterID] = st
+		}
+		st.Revenue += o.GrandTotal
+		st.Orders++
+		for _, it := range o.Items {
+			if it.IsFix && it.Status != domain.ItemVoided && it.Status != domain.ItemRefunded {
+				st.Guests += it.Qty
+			}
+		}
+	}
+	if len(acc) == 0 {
+		return []WaiterStat{}, nil
+	}
+
+	// Resolve names.
+	ids := make([]bson.ObjectID, 0, len(acc))
+	for id := range acc {
+		ids = append(ids, id)
+	}
+	wcur, err := s.db.Collection("waiters").Find(ctx,
+		bson.M{"restaurantId": restaurantID, "_id": bson.M{"$in": ids}},
+		options.Find().SetProjection(bson.M{"name": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find waiters: %w", err)
+	}
+	var waiters []struct {
+		ID   bson.ObjectID `bson:"_id"`
+		Name string        `bson:"name"`
+	}
+	if err := wcur.All(ctx, &waiters); err != nil {
+		return nil, fmt.Errorf("decode waiters: %w", err)
+	}
+	for _, w := range waiters {
+		if st, ok := acc[w.ID]; ok {
+			st.Name = w.Name
+		}
+	}
+
+	out := make([]WaiterStat, 0, len(acc))
+	for _, st := range acc {
+		if st.Name == "" {
+			st.Name = "Bilinmeyen garson"
+		}
+		out = append(out, *st)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Revenue != out[j].Revenue {
+			return out[i].Revenue > out[j].Revenue
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
 // sumExpenses totals expense amounts whose spentAt is in [from, to).
 func (s *Service) sumExpenses(ctx context.Context, restaurantID bson.ObjectID, from, to time.Time) (domain.Kurus, error) {
 	filter := bson.M{"restaurantId": restaurantID}
