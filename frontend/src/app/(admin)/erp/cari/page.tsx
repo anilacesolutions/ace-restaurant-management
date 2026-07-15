@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -287,18 +287,42 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
     [ym],
   );
 
+  const load = useCallback(
+    (reset: boolean) => {
+      if (reset) {
+        setExpenses(null);
+        setReceivables(null);
+      }
+      const qs = `from=${range.from}&to=${range.to}`;
+      api<ExpensesResponse>(`/api/v1/expenses?${qs}`)
+        .then((r) => setExpenses(r.expenses))
+        .catch((e) => onError(e instanceof Error ? e.message : String(e)));
+      api<ReceivablesResponse>(`/api/v1/receivables?${qs}`)
+        .then((r) => setReceivables(r.receivables))
+        .catch((e) => onError(e instanceof Error ? e.message : String(e)));
+    },
+    [range.from, range.to, onError],
+  );
+
   useEffect(() => {
-    setExpenses(null);
-    setReceivables(null);
-    const qs = `from=${range.from}&to=${range.to}`;
-    api<ExpensesResponse>(`/api/v1/expenses?${qs}`)
-      .then((r) => setExpenses(r.expenses))
-      .catch((e) => onError(e instanceof Error ? e.message : String(e)));
-    api<ReceivablesResponse>(`/api/v1/receivables?${qs}`)
-      .then((r) => setReceivables(r.receivables))
-      .catch((e) => onError(e instanceof Error ? e.message : String(e)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range.from, range.to]);
+    load(true);
+  }, [load]);
+
+  async function remove(en: TimelineEntry) {
+    const base = en.kind === "gider" ? "expenses" : "receivables";
+    if (
+      !confirm(
+        `${en.kind === "gider" ? "Gider" : "Alacak"} — ${en.title} · ${formatTRY(en.amount)} silinsin mi?`,
+      )
+    )
+      return;
+    try {
+      await api(`/api/v1/${base}/${en.id}`, { method: "DELETE" });
+      load(false);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   const loading = expenses === null || receivables === null;
   const giderTotal = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
@@ -376,11 +400,12 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
             const payLabel = isGider ? "Ödeme" : "Tahsilat";
             return (
               <li key={`${en.kind}-${en.id}`}>
+                <div className="flex items-center gap-2">
                 <button
                   onClick={() =>
                     en.partyId && router.push(`/erp/cari/${en.partyId}`)
                   }
-                  className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left shadow-sm active:bg-zinc-50"
+                  className="flex flex-1 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left shadow-sm active:bg-zinc-50"
                 >
                   <div className="flex w-14 shrink-0 flex-col items-center">
                     <span className="text-lg font-bold tabular-nums leading-none text-zinc-900">
@@ -438,6 +463,14 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
                     )}
                   </div>
                 </button>
+                <button
+                  onClick={() => remove(en)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-100 active:text-red-700"
+                  aria-label="Hareketi sil"
+                >
+                  ×
+                </button>
+                </div>
 
                 {/* ödeme / tahsilat entries under the movement */}
                 {en.payments.length > 0 && (
