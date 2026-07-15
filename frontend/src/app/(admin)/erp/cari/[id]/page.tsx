@@ -226,8 +226,11 @@ function MovementRow({ m, onOpen }: { m: Movement; onOpen: () => void }) {
   const paid = sumPay(doc.payments);
   const remaining = doc.amount - paid;
   const settled = remaining <= 0;
+  const payments = doc.payments ?? [];
+  const payLabel = isGider ? "Ödeme" : "Tahsilat";
 
   return (
+    <>
     <button
       onClick={onOpen}
       className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left shadow-sm active:bg-zinc-50"
@@ -283,6 +286,31 @@ function MovementRow({ m, onOpen }: { m: Movement; onOpen: () => void }) {
       </span>
       <span className="shrink-0 text-zinc-300">›</span>
     </button>
+
+    {/* Ödeme / tahsilat entries under the movement — a real ledger view. */}
+    {payments.length > 0 && (
+      <ul className="ml-14 mt-1 flex flex-col gap-1 border-l-2 border-zinc-100 pl-3">
+        {payments.map((p) => (
+          <li
+            key={p.id}
+            className="flex items-center justify-between text-xs text-zinc-500"
+          >
+            <span>
+              {new Date(p.paidAt).toLocaleDateString("tr-TR", {
+                timeZone: TZ,
+                day: "2-digit",
+                month: "short",
+              })}{" "}
+              · {payLabel}
+            </span>
+            <span className="tabular-nums font-medium text-green-700">
+              {formatTRY(p.amount)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    )}
+    </>
   );
 }
 
