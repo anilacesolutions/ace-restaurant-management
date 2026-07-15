@@ -8,8 +8,11 @@ import { formatTRY } from "@/lib/money";
 import type {
   Party,
   PartiesResponse,
+  Payment,
   Expense,
   ExpensesResponse,
+  Receivable,
+  ReceivablesResponse,
 } from "@/lib/types";
 
 const TZ = "Europe/Istanbul";
@@ -18,8 +21,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
 function todayISO(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 }
-
-const paidOf = (e: Expense) => (e.payments ?? []).reduce((s, p) => s + p.amount, 0);
 
 type Tab = "cariler" | "hareketler";
 
@@ -268,6 +269,7 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
     return { y, m };
   });
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
+  const [receivables, setReceivables] = useState<Receivable[] | null>(null);
 
   const range = useMemo(() => {
     const from = `${ym.y}-${pad(ym.m)}-01`;
@@ -287,13 +289,44 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
 
   useEffect(() => {
     setExpenses(null);
-    api<ExpensesResponse>(`/api/v1/expenses?from=${range.from}&to=${range.to}`)
+    setReceivables(null);
+    const qs = `from=${range.from}&to=${range.to}`;
+    api<ExpensesResponse>(`/api/v1/expenses?${qs}`)
       .then((r) => setExpenses(r.expenses))
+      .catch((e) => onError(e instanceof Error ? e.message : String(e)));
+    api<ReceivablesResponse>(`/api/v1/receivables?${qs}`)
+      .then((r) => setReceivables(r.receivables))
       .catch((e) => onError(e instanceof Error ? e.message : String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.from, range.to]);
 
-  const total = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
+  const loading = expenses === null || receivables === null;
+  const giderTotal = (expenses ?? []).reduce((s, e) => s + e.amount, 0);
+
+  // One chronological feed: every gider and every alacak, newest first.
+  const entries = useMemo<TimelineEntry[]>(() => {
+    const g: TimelineEntry[] = (expenses ?? []).map((e) => ({
+      kind: "gider",
+      id: e.id,
+      date: e.spentAt,
+      title: e.partyName || e.category || "Gider",
+      note: e.note,
+      amount: e.amount,
+      payments: e.payments ?? [],
+      partyId: e.partyId,
+    }));
+    const a: TimelineEntry[] = (receivables ?? []).map((r) => ({
+      kind: "alacak",
+      id: r.id,
+      date: r.issuedAt,
+      title: r.partyName || r.personName || "Alacak",
+      note: r.note,
+      amount: r.amount,
+      payments: r.payments ?? [],
+      partyId: r.partyId,
+    }));
+    return [...g, ...a].sort((x, y) => (x.date < y.date ? 1 : -1));
+  }, [expenses, receivables]);
 
   function shiftMonth(delta: number) {
     setYm((p) => {
@@ -317,7 +350,7 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
             {monthLabel}
           </span>
           <span className="text-xs text-zinc-500 tabular-nums">
-            {formatTRY(total)} gider
+            {formatTRY(giderTotal)} gider
           </span>
         </div>
         <button
@@ -329,61 +362,106 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
         </button>
       </div>
 
-      {expenses === null ? (
+      {loading ? (
         <p className="text-sm text-zinc-500">Yukleniyor...</p>
-      ) : expenses.length === 0 ? (
-        <p className="text-sm text-zinc-500">Bu ay gider yok.</p>
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-zinc-500">Bu ay hareket yok.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {expenses.map((e) => {
-            const remaining = e.amount - paidOf(e);
+          {entries.map((en) => {
+            const isGider = en.kind === "gider";
+            const paid = en.payments.reduce((s, p) => s + p.amount, 0);
+            const remaining = en.amount - paid;
+            const settled = remaining <= 0;
+            const payLabel = isGider ? "Ödeme" : "Tahsilat";
             return (
-              <li key={e.id}>
+              <li key={`${en.kind}-${en.id}`}>
                 <button
                   onClick={() =>
-                    e.partyId && router.push(`/erp/cari/${e.partyId}`)
+                    en.partyId && router.push(`/erp/cari/${en.partyId}`)
                   }
                   className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left shadow-sm active:bg-zinc-50"
                 >
                   <div className="flex w-14 shrink-0 flex-col items-center">
                     <span className="text-lg font-bold tabular-nums leading-none text-zinc-900">
-                      {new Date(e.spentAt).toLocaleDateString("tr-TR", {
+                      {new Date(en.date).toLocaleDateString("tr-TR", {
                         timeZone: TZ,
                         day: "2-digit",
                       })}
                     </span>
                     <span className="text-[10px] uppercase text-zinc-400">
-                      {new Date(e.spentAt).toLocaleDateString("tr-TR", {
+                      {new Date(en.date).toLocaleDateString("tr-TR", {
                         timeZone: TZ,
                         month: "short",
                       })}
                     </span>
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-base font-semibold text-zinc-900">
-                      {e.partyName || e.category || "Gider"}
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          isGider
+                            ? "bg-red-100 text-red-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                      >
+                        {isGider ? "Gider" : "Alacak"}
+                      </span>
+                      {settled && (
+                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
+                          {isGider ? "Ödendi" : "Tahsil edildi"}
+                        </span>
+                      )}
                     </span>
-                    {e.note && (
+                    <span className="mt-0.5 truncate text-sm font-semibold text-zinc-900">
+                      {en.title}
+                    </span>
+                    {en.note && (
                       <span className="truncate text-xs text-zinc-500">
-                        {e.note}
+                        {en.note}
                       </span>
                     )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end">
-                    <span className="text-base font-semibold tabular-nums text-zinc-900">
-                      {formatTRY(e.amount)}
+                    <span
+                      className={`text-base font-semibold tabular-nums ${
+                        isGider ? "text-red-700" : "text-green-700"
+                      }`}
+                    >
+                      {isGider ? "−" : "+"}
+                      {formatTRY(en.amount)}
                     </span>
-                    {remaining > 0 ? (
-                      <span className="text-[10px] font-medium uppercase text-red-600">
+                    {!settled && paid > 0 && (
+                      <span className="text-[10px] font-medium uppercase text-amber-600">
                         kalan {formatTRY(remaining)}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-medium uppercase text-green-600">
-                        ödendi
                       </span>
                     )}
                   </div>
                 </button>
+
+                {/* ödeme / tahsilat entries under the movement */}
+                {en.payments.length > 0 && (
+                  <ul className="ml-14 mt-1 flex flex-col gap-1 border-l-2 border-zinc-100 pl-3">
+                    {en.payments.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex items-center justify-between text-xs text-zinc-500"
+                      >
+                        <span>
+                          {new Date(p.paidAt).toLocaleDateString("tr-TR", {
+                            timeZone: TZ,
+                            day: "2-digit",
+                            month: "short",
+                          })}{" "}
+                          · {payLabel}
+                        </span>
+                        <span className="tabular-nums font-medium text-green-700">
+                          {formatTRY(p.amount)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}
@@ -392,6 +470,18 @@ function MovementTimeline({ onError }: { onError: (m: string) => void }) {
     </div>
   );
 }
+
+// A unified timeline entry — a gider or an alacak, with its payments.
+type TimelineEntry = {
+  kind: "gider" | "alacak";
+  id: string;
+  date: string;
+  title: string;
+  note?: string;
+  amount: number;
+  payments: Payment[];
+  partyId?: string;
+};
 
 // ---- New cari sheet -------------------------------------------------------
 
