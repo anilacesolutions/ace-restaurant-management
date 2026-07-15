@@ -6,6 +6,7 @@ const sections = [
   { href: "/erp/menu", title: "Menu", desc: "Kategori ve urunler" },
   { href: "/erp/cari", title: "Cari", desc: "Giderler, alacaklar, borç-alacak takibi" },
   { href: "/erp/raporlar", title: "Raporlar", desc: "Gunluk, haftalik satis" },
+  { href: "/erp/grafikler", title: "Grafikler", desc: "Gelir-gider trendi, kişi sayısı" },
 ] as const;
 
 export default function ErpHomePage() {

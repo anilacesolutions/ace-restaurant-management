@@ -222,10 +222,28 @@ export interface SalesReport {
   payment: Record<string, Kurus>; // "nakit","kart",... -> gross
   kdv: Record<string, Kurus>; // "10","20" -> tax portion
   topItems: ItemStat[];
+  guests: number; // fiks menü kişi sayısı toplamı
   expense: Kurus; // giderler in range
   profit: Kurus; // revenue - expense
   openReceivable: Kurus; // outstanding owed to us (snapshot)
   openPayable: Kurus; // outstanding we owe (snapshot)
+}
+
+export interface BucketPoint {
+  start: string; // RFC3339 bucket start
+  revenue: Kurus;
+  expense: Kurus;
+  guests: number;
+  orderCount: number;
+}
+
+export interface TimeSeriesReport {
+  bucket: "hour" | "day" | "month";
+  points: BucketPoint[];
+  revenue: Kurus;
+  expense: Kurus;
+  guests: number;
+  orderCount: number;
 }
 
 export interface User {

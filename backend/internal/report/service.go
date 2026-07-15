@@ -62,6 +62,7 @@ type SalesReport struct {
 	Payment    map[string]domain.Kurus `json:"payment"` // "nakit","kart",... -> gross
 	KDV        map[string]domain.Kurus `json:"kdv"`     // "10","20" -> tax portion
 	TopItems   []ItemStat              `json:"topItems"`
+	Guests     int                     `json:"guests"` // fiks menü kişi sayısı toplamı (IsFix satır qty)
 
 	Expense        domain.Kurus `json:"expense"`        // giderler in range (by spentAt)
 	Profit         domain.Kurus `json:"profit"`         // Revenue - Expense
@@ -130,6 +131,10 @@ func (s *Service) Sales(ctx context.Context, restaurantID bson.ObjectID, from, t
 			if it.Status == domain.ItemVoided || it.Status == domain.ItemRefunded {
 				continue
 			}
+			// Fiks menü parent line qty == number of people served.
+			if it.IsFix {
+				rep.Guests += it.Qty
+			}
 			st, ok := items[it.Name]
 			if !ok {
 				st = &ItemStat{Name: it.Name}
@@ -159,6 +164,159 @@ func (s *Service) Sales(ctx context.Context, restaurantID bson.ObjectID, from, t
 		return nil, err
 	}
 
+	return rep, nil
+}
+
+// BucketPoint is one time bucket of the trend series (an hour, day, or month).
+type BucketPoint struct {
+	Start      time.Time    `json:"start"`
+	Revenue    domain.Kurus `json:"revenue"`
+	Expense    domain.Kurus `json:"expense"`
+	Guests     int          `json:"guests"`
+	OrderCount int          `json:"orderCount"`
+}
+
+// TimeSeriesReport is a bucketed trend over [from, to) plus range totals. Bucket
+// is one of hour|day|month. Points covers every bucket in range (gaps = zero) so
+// the chart is continuous.
+type TimeSeriesReport struct {
+	Bucket     string        `json:"bucket"`
+	Points     []BucketPoint `json:"points"`
+	Revenue    domain.Kurus  `json:"revenue"`
+	Expense    domain.Kurus  `json:"expense"`
+	Guests     int           `json:"guests"`
+	OrderCount int           `json:"orderCount"`
+}
+
+func truncBucket(t time.Time, bucket string, loc *time.Location) time.Time {
+	t = t.In(loc)
+	switch bucket {
+	case "month":
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
+	case "hour":
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
+	default: // day
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+	}
+}
+
+func nextBucket(t time.Time, bucket string) time.Time {
+	switch bucket {
+	case "month":
+		return t.AddDate(0, 1, 0)
+	case "hour":
+		return t.Add(time.Hour)
+	default:
+		return t.AddDate(0, 0, 1)
+	}
+}
+
+// TimeSeries buckets revenue+guests (from closed orders, by closedAt) and
+// expense (by spentAt) into an hour/day/month trend over [from, to).
+func (s *Service) TimeSeries(ctx context.Context, restaurantID bson.ObjectID, from, to time.Time, bucket string, loc *time.Location) (*TimeSeriesReport, error) {
+	if bucket != "hour" && bucket != "day" && bucket != "month" {
+		bucket = "day"
+	}
+	rep := &TimeSeriesReport{Bucket: bucket, Points: []BucketPoint{}}
+
+	// Pre-create every bucket in range so gaps render as zero.
+	idx := map[int64]*BucketPoint{}
+	if !from.IsZero() && !to.IsZero() {
+		for b := truncBucket(from, bucket, loc); b.Before(to); b = nextBucket(b, bucket) {
+			p := &BucketPoint{Start: b}
+			idx[b.Unix()] = p
+			rep.Points = append(rep.Points, BucketPoint{Start: b})
+		}
+	}
+	// bucketFor returns the mutable point for a timestamp, creating one if the
+	// range was open (from/to zero) so nothing is dropped.
+	get := func(t time.Time) *BucketPoint {
+		key := truncBucket(t, bucket, loc)
+		if p, ok := idx[key.Unix()]; ok {
+			return p
+		}
+		p := &BucketPoint{Start: key}
+		idx[key.Unix()] = p
+		rep.Points = append(rep.Points, BucketPoint{Start: key})
+		return p
+	}
+
+	// Closed orders → revenue, guests, count.
+	ofilter := bson.M{"restaurantId": restaurantID, "status": domain.OrderClosed}
+	orng := bson.M{}
+	if !from.IsZero() {
+		orng["$gte"] = from
+	}
+	if !to.IsZero() {
+		orng["$lt"] = to
+	}
+	if len(orng) > 0 {
+		ofilter["closedAt"] = orng
+	}
+	ocur, err := s.db.Collection("orders").Find(ctx, ofilter,
+		options.Find().SetProjection(bson.M{"closedAt": 1, "grandTotal": 1, "items": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find closed orders: %w", err)
+	}
+	var orders []domain.Order
+	if err := ocur.All(ctx, &orders); err != nil {
+		return nil, fmt.Errorf("decode closed orders: %w", err)
+	}
+	for _, o := range orders {
+		if o.ClosedAt == nil {
+			continue
+		}
+		p := get(*o.ClosedAt)
+		p.Revenue += o.GrandTotal
+		p.OrderCount++
+		rep.Revenue += o.GrandTotal
+		rep.OrderCount++
+		for _, it := range o.Items {
+			if it.IsFix && it.Status != domain.ItemVoided && it.Status != domain.ItemRefunded {
+				p.Guests += it.Qty
+				rep.Guests += it.Qty
+			}
+		}
+	}
+
+	// Expenses → expense side, by spentAt.
+	efilter := bson.M{"restaurantId": restaurantID}
+	erng := bson.M{}
+	if !from.IsZero() {
+		erng["$gte"] = from
+	}
+	if !to.IsZero() {
+		erng["$lt"] = to
+	}
+	if len(erng) > 0 {
+		efilter["spentAt"] = erng
+	}
+	ecur, err := s.db.Collection("expenses").Find(ctx, efilter,
+		options.Find().SetProjection(bson.M{"spentAt": 1, "amount": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find expenses: %w", err)
+	}
+	var exps []struct {
+		SpentAt time.Time    `bson:"spentAt"`
+		Amount  domain.Kurus `bson:"amount"`
+	}
+	if err := ecur.All(ctx, &exps); err != nil {
+		return nil, fmt.Errorf("decode expenses: %w", err)
+	}
+	for _, e := range exps {
+		get(e.SpentAt).Expense += e.Amount
+		rep.Expense += e.Amount
+	}
+
+	// Sync the mutable point values back into the ordered slice.
+	sort.Slice(rep.Points, func(i, j int) bool {
+		return rep.Points[i].Start.Before(rep.Points[j].Start)
+	})
+	for i := range rep.Points {
+		if p, ok := idx[rep.Points[i].Start.Unix()]; ok {
+			rep.Points[i] = *p
+		}
+	}
 	return rep, nil
 }
 

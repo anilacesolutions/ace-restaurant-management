@@ -29,7 +29,21 @@ func NewHandler(svc *Service, defaultRestaurantID string, loc *time.Location) (*
 // MountAdmin mounts the reports endpoints — admin only.
 func (h *Handler) MountAdmin(r chi.Router) {
 	r.Get("/reports/sales", h.sales)
+	r.Get("/reports/timeseries", h.timeseries)
 	r.Post("/reports/print", h.print)
+}
+
+func (h *Handler) timeseries(w http.ResponseWriter, r *http.Request) {
+	from := h.parseDay(r.URL.Query().Get("from"))
+	to := h.parseDay(r.URL.Query().Get("to"))
+	bucket := r.URL.Query().Get("bucket")
+
+	rep, err := h.svc.TimeSeries(r.Context(), h.restaurantID, from, to, bucket, h.loc)
+	if err != nil {
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, rep)
 }
 
 func (h *Handler) print(w http.ResponseWriter, r *http.Request) {
