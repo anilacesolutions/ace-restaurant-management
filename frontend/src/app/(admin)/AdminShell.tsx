@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AdminHeader } from "@/components/AdminHeader";
 import { IssueQRModal } from "@/components/IssueQRModal";
 import { Footer } from "@/components/Footer";
+import { TitleManager } from "@/components/TitleManager";
 import type { User } from "@/lib/types";
 
 export function AdminShell({
@@ -17,6 +18,7 @@ export function AdminShell({
 
   return (
     <div className="flex flex-1 flex-col">
+      <TitleManager />
       <AdminHeader user={user} onIssueQR={() => setQrOpen(true)} />
       <div className="flex flex-1 flex-col">{children}</div>
       <Footer />
