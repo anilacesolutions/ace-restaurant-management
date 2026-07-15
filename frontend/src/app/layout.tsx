@@ -8,8 +8,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Restoran",
-  description: "Restoran siparis ve yonetim sistemi",
+  // Each section sets its own title; the template prefixes the venue name so
+  // the tab reads e.g. "Gün Güzelbahçe | Kasa".
+  title: {
+    default: "Gün Güzelbahçe",
+    template: "Gün Güzelbahçe | %s",
+  },
+  description: "Gün Güzelbahçe sipariş ve yönetim sistemi",
 };
 
 export const viewport: Viewport = {
