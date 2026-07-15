@@ -100,7 +100,9 @@ type AddItemInput struct {
 // AddItems opens the table's order if needed, appends the given items (snapshot
 // of menu data, marked "sent"), recomputes totals, persists, and publishes the
 // kitchen ticket + cashier update. This is the waiter's "Mutfağa Gönder".
-func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.ObjectID, tableNumber int, ins []AddItemInput, now time.Time) (*domain.Order, error) {
+// waiterOverride (optional; cashier-supplied) sets the order's waiter when it's
+// first opened at the register; zero means attribute it to the caller.
+func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID, waiterOverride bson.ObjectID, tableNumber int, ins []AddItemInput, now time.Time) (*domain.Order, error) {
 	if len(ins) == 0 {
 		return nil, ErrValidation{"En az bir ürün ekleyin"}
 	}
@@ -167,11 +169,15 @@ func (s *Service) AddItems(ctx context.Context, restaurantID, subjectID bson.Obj
 
 	var order *domain.Order
 	if existing == nil {
+		waiterID := subjectID
+		if !waiterOverride.IsZero() {
+			waiterID = waiterOverride
+		}
 		order = &domain.Order{
 			ID:           bson.NewObjectID(),
 			RestaurantID: restaurantID,
 			TableNumber:  tableNumber,
-			WaiterID:     subjectID,
+			WaiterID:     waiterID,
 			Status:       domain.OrderOpen,
 			Items:        newItems,
 			OpenedAt:     now,

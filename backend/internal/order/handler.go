@@ -108,6 +108,10 @@ func (h *Handler) activeForTable(w http.ResponseWriter, r *http.Request) {
 
 type addItemsReq struct {
 	Items []AddItemInput `json:"items"`
+	// WaiterID lets the cashier (admin) attribute a table they open at the
+	// register to a specific waiter. Ignored for waiter sessions (they're always
+	// their own subject) and only applied when the order is first created.
+	WaiterID string `json:"waiterId"`
 }
 
 func (h *Handler) addItems(w http.ResponseWriter, r *http.Request) {
@@ -120,12 +124,19 @@ func (h *Handler) addItems(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "geçersiz istek gövdesi")
 		return
 	}
-	subjectID, _, ok := auth.SubjectFromCtx(r.Context())
+	subjectID, isWaiter, ok := auth.SubjectFromCtx(r.Context())
 	if !ok {
 		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	o, err := h.svc.AddItems(r.Context(), h.restaurantID, subjectID, tableNo, req.Items, time.Now())
+	// A cashier (admin) may assign the table to a waiter; waiters can't override.
+	var waiterOverride bson.ObjectID
+	if !isWaiter && req.WaiterID != "" {
+		if id, err := bson.ObjectIDFromHex(req.WaiterID); err == nil {
+			waiterOverride = id
+		}
+	}
+	o, err := h.svc.AddItems(r.Context(), h.restaurantID, subjectID, waiterOverride, tableNo, req.Items, time.Now())
 	if err != nil {
 		var verr ErrValidation
 		if errors.As(err, &verr) {

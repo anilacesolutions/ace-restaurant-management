@@ -13,6 +13,8 @@ import type {
   Order,
   OrderItem,
   OrderResponse,
+  Waiter,
+  WaitersResponse,
 } from "@/lib/types";
 
 interface DraftLine {
@@ -77,6 +79,12 @@ export function TableOrderEntry({
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Cashier-only: which waiter this table is being opened for. Asked once, on
+  // the first send of an empty table; waiters (garson app) never see this.
+  const [waiters, setWaiters] = useState<Waiter[]>([]);
+  const [waiterId, setWaiterId] = useState<string | null>(null);
+  const [pickingWaiter, setPickingWaiter] = useState(false);
+
   const draftKey = `order-draft-masa-${tableNumber}`;
   const fixDraftKey = `order-fixdraft-masa-${tableNumber}`;
 
@@ -104,6 +112,14 @@ export function TableOrderEntry({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableNumber]);
+
+  // Cashier needs the waiter list to attribute a register-opened table.
+  useEffect(() => {
+    if (!cashier) return;
+    api<WaitersResponse>("/api/v1/waiters")
+      .then((r) => setWaiters(r.waiters.filter((w) => w.active)))
+      .catch(() => {});
+  }, [cashier]);
 
   // Restore any unsent draft for this table (survives reload / signal drop).
   useEffect(() => {
@@ -188,7 +204,18 @@ export function TableOrderEntry({
     });
   }
 
-  async function send() {
+  // Cashier opening an empty table must attribute it to a waiter first; the
+  // picker then resumes the send with the chosen id (state would be stale).
+  function send() {
+    if (!hasDraft) return;
+    if (cashier && !order && !waiterId) {
+      setPickingWaiter(true);
+      return;
+    }
+    doSend(waiterId);
+  }
+
+  async function doSend(wId: string | null) {
     if (!hasDraft) return;
     setSending(true);
     setError(null);
@@ -207,9 +234,12 @@ export function TableOrderEntry({
           ),
         })),
       ];
+      // Only meaningful when the cashier first opens the table.
+      const body =
+        cashier && !order && wId ? { items, waiterId: wId } : { items };
       const r = await api<OrderResponse>(
         `/api/v1/orders/table/${tableNumber}/items`,
-        { method: "POST", body: JSON.stringify({ items }) },
+        { method: "POST", body: JSON.stringify(body) },
       );
       setOrder(r.order);
       setDraft({});
@@ -277,40 +307,53 @@ export function TableOrderEntry({
 
   if (view === "menu") {
     return (
-      <MenuView
-        tableNumber={tableNumber}
-        menu={menu ?? []}
-        order={order}
-        draft={draft}
-        draftLines={draftLines}
-        fixDraft={fixDraft}
-        totalCount={totalDraftCount}
-        totalAmount={totalDraftAmount}
-        hasDraft={hasDraft}
-        sending={sending}
-        error={error}
-        onBack={() => setView("adisyon")}
-        onPick={setPicking}
-        onPickFix={setPickingFix}
-        onOpenDraft={() => setShowDraft(true)}
-        onSend={send}
-        picking={picking}
-        onClosePick={() => setPicking(null)}
-        onAdd={(qty, note) => {
-          if (picking) addToDraft(picking, qty, note);
-          setPicking(null);
-        }}
-        pickingFix={pickingFix}
-        onCloseFixPick={() => setPickingFix(null)}
-        onAddFix={(qty, includes) => {
-          if (pickingFix) addFix(pickingFix, qty, includes);
-          setPickingFix(null);
-        }}
-        showDraft={showDraft}
-        onCloseDraft={() => setShowDraft(false)}
-        onQty={setDraftQty}
-        onRemoveFix={removeFix}
-      />
+      <>
+        <MenuView
+          tableNumber={tableNumber}
+          menu={menu ?? []}
+          order={order}
+          draft={draft}
+          draftLines={draftLines}
+          fixDraft={fixDraft}
+          totalCount={totalDraftCount}
+          totalAmount={totalDraftAmount}
+          hasDraft={hasDraft}
+          sending={sending}
+          error={error}
+          onBack={() => setView("adisyon")}
+          onPick={setPicking}
+          onPickFix={setPickingFix}
+          onOpenDraft={() => setShowDraft(true)}
+          onSend={send}
+          picking={picking}
+          onClosePick={() => setPicking(null)}
+          onAdd={(qty, note) => {
+            if (picking) addToDraft(picking, qty, note);
+            setPicking(null);
+          }}
+          pickingFix={pickingFix}
+          onCloseFixPick={() => setPickingFix(null)}
+          onAddFix={(qty, includes) => {
+            if (pickingFix) addFix(pickingFix, qty, includes);
+            setPickingFix(null);
+          }}
+          showDraft={showDraft}
+          onCloseDraft={() => setShowDraft(false)}
+          onQty={setDraftQty}
+          onRemoveFix={removeFix}
+        />
+        {pickingWaiter && (
+          <WaiterPickerSheet
+            waiters={waiters}
+            onClose={() => setPickingWaiter(false)}
+            onPick={(w) => {
+              setWaiterId(w.id);
+              setPickingWaiter(false);
+              doSend(w.id);
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -1283,6 +1326,59 @@ function FixWizard({
             ? `Sepete Ekle · ${formatTRY(fix.price * qty)}`
             : "İçerik seç"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Cashier-only: pick which waiter a register-opened table belongs to.
+function WaiterPickerSheet({
+  waiters,
+  onPick,
+  onClose,
+}: {
+  waiters: Waiter[];
+  onPick: (w: Waiter) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-white">
+      <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <button
+          onClick={onClose}
+          className="rounded-full px-3 py-2 text-sm font-medium text-zinc-600 active:bg-zinc-100"
+        >
+          Iptal
+        </button>
+        <h2 className="text-base font-semibold text-zinc-900">Garson seç</h2>
+        <span className="w-16" />
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        <p className="mb-3 text-sm text-zinc-500">Bu masa hangi garsonun?</p>
+        {waiters.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            Aktif garson yok. ERP → Garsonlar bölümünden ekleyin.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {waiters.map((w) => (
+              <li key={w.id}>
+                <button
+                  onClick={() => onPick(w)}
+                  className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left shadow-sm active:bg-zinc-50"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-sky-100 text-base font-semibold text-sky-800">
+                    {w.name.slice(0, 1).toUpperCase()}
+                  </div>
+                  <span className="text-base font-medium text-zinc-900">
+                    {w.name}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

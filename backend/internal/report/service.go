@@ -391,18 +391,27 @@ func (s *Service) WaiterStats(ctx context.Context, restaurantID bson.ObjectID, f
 	if err := wcur.All(ctx, &waiters); err != nil {
 		return nil, fmt.Errorf("decode waiters: %w", err)
 	}
+	names := make(map[bson.ObjectID]string, len(waiters))
 	for _, w := range waiters {
-		if st, ok := acc[w.ID]; ok {
-			st.Name = w.Name
-		}
+		names[w.ID] = w.Name
 	}
 
+	// Orders whose waiterId doesn't resolve to a current waiter (opened at the
+	// register, or a since-deleted waiter) collapse into one "Kasa Açtı" row.
 	out := make([]WaiterStat, 0, len(acc))
-	for _, st := range acc {
-		if st.Name == "" {
-			st.Name = "Bilinmeyen garson"
+	kasa := WaiterStat{Name: "Kasa Açtı"}
+	for id, st := range acc {
+		if name, ok := names[id]; ok {
+			st.Name = name
+			out = append(out, *st)
+		} else {
+			kasa.Revenue += st.Revenue
+			kasa.Orders += st.Orders
+			kasa.Guests += st.Guests
 		}
-		out = append(out, *st)
+	}
+	if kasa.Orders > 0 {
+		out = append(out, kasa)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Revenue != out[j].Revenue {
