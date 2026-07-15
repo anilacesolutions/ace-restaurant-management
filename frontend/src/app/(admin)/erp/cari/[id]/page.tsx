@@ -183,6 +183,10 @@ function NetCard({ ledger }: { ledger: PartyLedger }) {
   const { net, borc, alacak } = ledger;
   const owedToUs = net > 0;
   const clean = net === 0;
+  // Lifetime cash flow with this cari: aldığımız = collected from them
+  // (tahsilat), verdiğimiz = paid to them (ödeme).
+  const aldigimiz = ledger.receivables.reduce((s, r) => s + sumPay(r.payments), 0);
+  const verdigimiz = ledger.expenses.reduce((s, e) => s + sumPay(e.payments), 0);
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="flex items-baseline justify-between">
@@ -214,6 +218,33 @@ function NetCard({ ledger }: { ledger: PartyLedger }) {
           <span className="text-base font-semibold tabular-nums text-red-700">
             {formatTRY(borc)}
           </span>
+        </div>
+      </div>
+
+      {/* Lifetime cash flow — what actually changed hands to date. */}
+      <div className="mt-3 border-t border-zinc-100 pt-3">
+        <p className="mb-2 text-center text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+          Bugüne kadar
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div className="flex flex-col">
+            <span className="text-xs text-zinc-500">Aldığımız</span>
+            <span className="text-base font-semibold tabular-nums text-zinc-900">
+              {formatTRY(aldigimiz)}
+            </span>
+            <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+              tahsil edilen
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-zinc-500">Verdiğimiz</span>
+            <span className="text-base font-semibold tabular-nums text-zinc-900">
+              {formatTRY(verdigimiz)}
+            </span>
+            <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+              ödenen
+            </span>
+          </div>
         </div>
       </div>
     </div>
