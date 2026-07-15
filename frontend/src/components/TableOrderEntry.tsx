@@ -84,6 +84,28 @@ export function TableOrderEntry({
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [waiterId, setWaiterId] = useState<string | null>(null);
   const [pickingWaiter, setPickingWaiter] = useState(false);
+  // When the picker was opened by a send that needs a waiter first, resume the
+  // send after the pick; when opened from the table screen, just set it.
+  const [pendingSend, setPendingSend] = useState(false);
+  const selectedWaiterName =
+    waiters.find((w) => w.id === waiterId)?.name ?? null;
+
+  function openWaiterPicker() {
+    setPendingSend(false);
+    setPickingWaiter(true);
+  }
+  function closeWaiterPicker() {
+    setPendingSend(false);
+    setPickingWaiter(false);
+  }
+  function pickWaiter(w: Waiter) {
+    setWaiterId(w.id);
+    setPickingWaiter(false);
+    if (pendingSend) {
+      setPendingSend(false);
+      doSend(w.id);
+    }
+  }
 
   const draftKey = `order-draft-masa-${tableNumber}`;
   const fixDraftKey = `order-fixdraft-masa-${tableNumber}`;
@@ -209,6 +231,7 @@ export function TableOrderEntry({
   function send() {
     if (!hasDraft) return;
     if (cashier && !order && !waiterId) {
+      setPendingSend(true);
       setPickingWaiter(true);
       return;
     }
@@ -345,12 +368,8 @@ export function TableOrderEntry({
         {pickingWaiter && (
           <WaiterPickerSheet
             waiters={waiters}
-            onClose={() => setPickingWaiter(false)}
-            onPick={(w) => {
-              setWaiterId(w.id);
-              setPickingWaiter(false);
-              doSend(w.id);
-            }}
+            onClose={closeWaiterPicker}
+            onPick={pickWaiter}
           />
         )}
       </>
@@ -366,6 +385,11 @@ export function TableOrderEntry({
         error={error}
         cashier={cashier}
         notice={printNotice}
+        waiterSelect={
+          cashier && !order
+            ? { name: selectedWaiterName, onPick: openWaiterPicker }
+            : null
+        }
         onNewOrder={() => setView("menu")}
         onPrint={printAdisyon}
         onClose={() => setShowClose(true)}
@@ -378,6 +402,13 @@ export function TableOrderEntry({
           closing={closing}
           onCancel={() => setShowClose(false)}
           onConfirm={closeTable}
+        />
+      )}
+      {pickingWaiter && (
+        <WaiterPickerSheet
+          waiters={waiters}
+          onClose={closeWaiterPicker}
+          onPick={pickWaiter}
         />
       )}
     </>
@@ -393,6 +424,7 @@ function AdisyonView({
   error,
   cashier,
   notice,
+  waiterSelect,
   onNewOrder,
   onPrint,
   onClose,
@@ -404,6 +436,7 @@ function AdisyonView({
   error: string | null;
   cashier: boolean;
   notice: string | null;
+  waiterSelect: { name: string | null; onPick: () => void } | null;
   onNewOrder: () => void;
   onPrint: () => void;
   onClose: () => void;
@@ -471,6 +504,26 @@ function AdisyonView({
         <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
           {notice}
         </div>
+      )}
+
+      {/* Cashier: pick the waiter up front — no need to send to the kitchen. */}
+      {waiterSelect && (
+        <button
+          onClick={waiterSelect.onPick}
+          className="flex items-center justify-between rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-left shadow-sm active:bg-sky-100"
+        >
+          <span className="flex flex-col">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-sky-700/70">
+              Garson
+            </span>
+            <span className="text-base font-semibold text-sky-900">
+              {waiterSelect.name ?? "Seçilmedi"}
+            </span>
+          </span>
+          <span className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white">
+            {waiterSelect.name ? "Değiştir" : "Garson Seç"}
+          </span>
+        </button>
       )}
 
       {items.length === 0 ? (
