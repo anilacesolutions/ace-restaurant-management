@@ -32,6 +32,14 @@ export function AdminHeader({
 
   return (
     <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur">
+      {/* Brand mark — absolutely centred so it never pushes/wraps the nav or
+          actions; hidden on small screens to avoid overlap on phones. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/gunguzelbahce-logo.png"
+        alt="Gün Güzelbahçe"
+        className="pointer-events-none absolute left-1/2 top-1/2 hidden h-10 w-auto -translate-x-1/2 -translate-y-1/2 md:block"
+      />
       <nav className="flex gap-1">
         {tabs.map((t) => {
           const active = pathname === t.href || pathname.startsWith(t.href + "/");
